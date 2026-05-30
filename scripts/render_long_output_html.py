@@ -440,8 +440,8 @@ def main():
 
     .masthead {{
       border-bottom: 2px solid var(--rule-strong);
-      padding-bottom: 34px;
-      margin-bottom: 34px;
+      padding-bottom: 40px;
+      margin-bottom: 42px;
     }}
     .masthead-top-bar {{
       display: flex;
@@ -474,11 +474,12 @@ def main():
       margin: 0;
       text-align: center;
       font-family: \"Newsreader\", \"Source Serif 4\", \"Noto Serif SC\", serif;
-      font-size: clamp(3.1rem, 7vw, 6.2rem);
+      font-size: clamp(3.25rem, 7.2vw, 6.6rem);
       font-weight: 700;
-      line-height: 0.96;
-      letter-spacing: -0.025em;
+      line-height: 0.92;
+      letter-spacing: -0.035em;
       color: var(--ink);
+      text-wrap: balance;
     }}
     .subtitle {{
       margin: 18px auto 0;
@@ -540,20 +541,21 @@ def main():
       break-inside: avoid;
     }}
 
-    .articles-container {{ display: grid; gap: 56px; }}
+    .articles-container {{ display: grid; gap: 64px; }}
     .module {{
-      padding-bottom: 56px;
+      padding-bottom: 64px;
       border-bottom: 1px solid var(--rule-soft);
     }}
     .module:last-child {{ border-bottom: none; padding-bottom: 0; }}
-    .module-header {{ margin-bottom: 24px; }}
+    .module-header {{ margin-bottom: 28px; }}
     .module-title, .section-title {{
-      margin: 10px 0 0;
+      margin: 12px 0 0;
       font-family: \"Newsreader\", \"Source Serif 4\", \"Noto Serif SC\", serif;
-      font-size: clamp(2.1rem, 4vw, 3.5rem);
+      font-size: clamp(2.2rem, 4.2vw, 3.7rem);
       font-weight: 600;
-      line-height: 1.06;
-      letter-spacing: -0.02em;
+      line-height: 1.02;
+      letter-spacing: -0.03em;
+      text-wrap: balance;
     }}
     .module-intro, .section-lead {{
       max-width: 760px;
@@ -610,17 +612,19 @@ def main():
       column-span: all;
       -webkit-column-span: all;
     }}
-    .article-body p {{ margin: 0 0 1.6em; }}
+    .article-body p {{ margin: 0 0 1.65em; }}
     .article-body h1, .article-body h2, .article-body h3, .article-body h4, .article-body h5, .article-body h6 {{
-      margin: 1.8em 0 0.8em;
+      margin: 2.05em 0 0.75em;
       font-family: \"Source Serif 4\", \"Noto Serif SC\", serif;
-      line-height: 1.35;
+      line-height: 1.28;
       font-weight: 600;
+      letter-spacing: -0.012em;
+      color: var(--ink);
     }}
-    .article-body h1 {{ font-size: 1.9rem; }}
-    .article-body h2 {{ font-size: 1.55rem; }}
-    .article-body h3 {{ font-size: 1.3rem; }}
-    .article-body h4 {{ font-size: 1.14rem; }}
+    .article-body h1 {{ font-size: 1.82rem; }}
+    .article-body h2 {{ font-size: 1.48rem; }}
+    .article-body h3 {{ font-size: 1.24rem; color: var(--ink-soft); }}
+    .article-body h4 {{ font-size: 1.08rem; color: var(--ink-soft); }}
     .article-body hr {{ border: none; border-top: 1px solid var(--rule-soft); margin: 2em 0; }}
     .article-body a {{ color: var(--accent); text-decoration: none; border-bottom: 1px solid color-mix(in srgb, var(--accent) 38%, transparent); }}
     .article-body a:hover {{ border-bottom-color: var(--accent); }}
@@ -692,43 +696,52 @@ def main():
       padding: 0;
       margin: 0;
       display: grid;
-      gap: 18px;
+      gap: 0;
+      border-top: 1px solid var(--rule-strong);
+      border-bottom: 1px solid var(--rule-strong);
     }}
     .summary-card {{
       display: grid;
-      grid-template-columns: 54px 1fr;
-      gap: 18px;
-      padding-bottom: 18px;
+      grid-template-columns: 64px 1fr;
+      gap: 22px;
+      padding: 22px 0;
       border-bottom: 1px solid var(--rule-soft);
     }}
-    .summary-card:last-child {{ padding-bottom: 0; border-bottom: none; }}
-    .summary-copy {{ border-left: 1px solid var(--rule-soft); padding-left: 18px; }}
+    .summary-card:last-child {{ padding-bottom: 22px; border-bottom: none; }}
+    .summary-copy {{ border-left: 1px solid var(--rule-soft); padding-left: 22px; }}
     .summary-card-title {{
-      margin: 0 0 6px;
-      font-size: 1.08rem;
+      margin: 0 0 8px;
+      font-size: 1.02rem;
       font-family: \"Inter\", sans-serif;
       font-weight: 700;
-      letter-spacing: 0.01em;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
     }}
-    .summary-card-text {{ margin: 0; line-height: 1.8; color: var(--ink); }}
+    .summary-card-text {{ margin: 0; font-size: 1.02rem; line-height: 1.85; color: var(--ink); }}
 
     .module-quote {{
       display: grid;
-      gap: 18px;
+      gap: 22px;
       justify-items: center;
       text-align: center;
-      padding-top: 10px;
-      padding-bottom: 48px;
+      padding: 22px 0 58px;
     }}
-    .quote-rule {{ width: 100%; border-top: 1px solid var(--rule-soft); }}
-    .quote-main {{ margin: 0; max-width: 760px; }}
-    .quote-mark {{ margin: 0; color: var(--accent); font-size: clamp(3rem, 7vw, 5rem); line-height: 0.9; }}
+    .quote-rule {{ width: min(760px, 100%); border-top: 1px solid var(--rule-strong); }}
+    .quote-main {{ margin: 0; max-width: 820px; }}
+    .quote-mark {{
+      margin: 0 0 -8px;
+      color: var(--accent);
+      font-size: clamp(2.4rem, 5vw, 3.8rem);
+      line-height: 0.8;
+      opacity: 0.72;
+    }}
     .quote-text {{
       margin: 0;
       font-family: \"Newsreader\", \"Source Serif 4\", \"Noto Serif SC\", serif;
-      font-size: clamp(2rem, 4vw, 3.2rem);
-      line-height: 1.18;
-      letter-spacing: -0.015em;
+      font-size: clamp(1.9rem, 3.7vw, 3rem);
+      line-height: 1.2;
+      letter-spacing: -0.018em;
+      text-wrap: balance;
     }}
     .quote-note, .quote-attribution {{
       margin: 0;
@@ -746,38 +759,44 @@ def main():
     .compare-grid {{
       display: grid;
       grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
-      gap: 24px;
-      align-items: start;
+      gap: 28px;
+      align-items: stretch;
     }}
     .compare-card {{
-      padding: 20px 22px;
-      background: var(--surface);
-      border: 1px solid var(--rule-soft);
-      box-shadow: var(--shadow);
+      padding: 26px 28px;
+      background: color-mix(in srgb, var(--surface) 78%, var(--bg));
+      border-top: 2px solid var(--rule-strong);
+      border-bottom: 1px solid var(--rule-soft);
+      border-left: none;
+      border-right: none;
+      box-shadow: none;
     }}
-    .compare-card-title {{ margin-bottom: 14px; }}
+    .compare-card-title {{ margin-bottom: 18px; }}
     .compare-divider {{
       align-self: stretch;
       display: flex;
       align-items: center;
-      color: var(--ink-soft);
+      color: var(--accent);
       font-family: \"Inter\", sans-serif;
-      font-size: 11px;
-      letter-spacing: 0.18em;
+      font-size: 10px;
+      letter-spacing: 0.2em;
       text-transform: uppercase;
     }}
-    .compare-list {{ list-style: none; padding: 0; margin: 0; display: grid; gap: 12px; }}
-    .compare-item {{ display: grid; gap: 4px; }}
+    .compare-list {{ list-style: none; padding: 0; margin: 0; display: grid; gap: 15px; }}
+    .compare-item {{ display: grid; gap: 5px; padding-bottom: 14px; border-bottom: 1px solid var(--rule-soft); }}
+    .compare-item:last-child {{ padding-bottom: 0; border-bottom: none; }}
     .compare-label {{
       font-family: \"Inter\", sans-serif;
       font-size: 10px;
       color: var(--accent);
-      letter-spacing: 0.15em;
+      letter-spacing: 0.16em;
       text-transform: uppercase;
     }}
-    .compare-text {{ line-height: 1.75; }}
+    .compare-text {{ line-height: 1.78; }}
     .compare-takeaway {{
-      margin: 18px 0 0;
+      margin: 22px 0 0;
+      padding-top: 16px;
+      border-top: 1px solid var(--rule-soft);
       color: var(--ink-soft);
       line-height: 1.8;
     }}
@@ -796,9 +815,10 @@ def main():
 
     @media (max-width: 680px) {{
       .module-title, .section-title {{ font-size: clamp(1.8rem, 8vw, 2.6rem); }}
-      .summary-card {{ grid-template-columns: 1fr; gap: 10px; }}
+      .summary-card {{ grid-template-columns: 1fr; gap: 10px; padding: 18px 0; }}
       .summary-copy {{ border-left: none; padding-left: 0; border-top: 1px solid var(--rule-soft); padding-top: 10px; }}
       .quote-text {{ font-size: clamp(1.6rem, 8vw, 2.2rem); }}
+      .compare-card {{ padding: 22px 0; }}
     }}
   </style>
 </head>

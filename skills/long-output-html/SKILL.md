@@ -24,6 +24,13 @@ description: Use when the answer will likely exceed three terminal paragraphs or
 4. **统一走现有脚本**：只调用 `/Users/xinyuan/.claude/scripts/render_long_output_html.py`。
 5. **只描述当前能力**：不要假设折叠、标签展示或其他未实现交互。
 
+## 视觉基准
+
+- 目标是轻量的 editorial reading page：清楚、克制、适合长文阅读，而不是重型前端页面。
+- 标题层级要稳定：页面标题负责定调，section 标题负责分段，正文内标题只承担局部层级。
+- `summary` 更像导读栏，`quote` 更像杂志 pull quote，`compare` 更像左右编辑对照卡。
+- 保持少装饰、多留白、单一强调色；避免复杂动画、重阴影、炫技渐变和未实现的交互承诺。
+
 ## 最小输入结构
 
 在调用本 skill 前，先把内容组织成 JSON：
