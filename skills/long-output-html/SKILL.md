@@ -26,10 +26,13 @@ description: Use when the answer will likely exceed three terminal paragraphs or
 
 ## 视觉基准
 
-- 目标是轻量的 editorial reading page：清楚、克制、适合长文阅读，而不是重型前端页面。
+- 目标是清晰、低模板感、适合中文技术长文的本地阅读页，而不是伪报纸、杂志封面或重型前端页面。
 - 标题层级要稳定：页面标题负责定调，section 标题负责分段，正文内标题只承担局部层级。
-- `summary` 更像导读栏，`quote` 更像杂志 pull quote，`compare` 更像左右编辑对照卡。
-- 保持少装饰、多留白、单一强调色；避免复杂动画、重阴影、炫技渐变和未实现的交互承诺。
+- `summary` 是导读栏，`quote` 是节奏停顿，`compare` 是左右编辑对照卡；模块要服务理解，不要制造固定装饰语法。
+- 默认正文优先单栏阅读，控制行长和段落节奏；只有短段落、展示性文本或用户明确要求时，才使用多栏。
+- 禁止默认伪报纸 chrome：固定 masthead 文案、`#0001`、重复 `SECTION 01/02/03`、每节 uppercase kicker、过度 editorial 字体组合。
+- 保持少装饰、多留白、单一强调色；避免复杂动画、重阴影、炫技渐变、侧边强调条和未实现的交互承诺。
+- 外部依赖必须克制：字体优先系统回退，MathJax 等脚本只在内容需要或输入显式要求时加载。
 
 ## 最小输入结构
 
@@ -117,6 +120,8 @@ description: Use when the answer will likely exceed three terminal paragraphs or
 - `body_variant`: `"narrative" | "sidenotes"`
   - 控制正文模块的默认主版式
   - 默认值为 `"narrative"`
+- `math`: `true | false`
+  - 显式声明页面需要数学公式渲染；不传时脚本可按内容自动判断
 - `tags`: 页面顶部标签列表，可选
 
 ### section 可选字段
@@ -134,7 +139,7 @@ description: Use when the answer will likely exceed three terminal paragraphs or
 ### 两种正文主版式
 
 #### 1. `narrative`
-用于纯叙述型长文，视觉上更接近宽松双栏的编辑排版。
+用于纯叙述型长文，视觉上是行长受控的单栏阅读版式。
 
 适合：
 - 连续解释
@@ -143,6 +148,7 @@ description: Use when the answer will likely exceed three terminal paragraphs or
 
 不适合：
 - 需要大量旁注、术语解释、补充上下文的内容
+- 主要靠短块并列浏览的展示型内容
 
 #### 2. `sidenotes`
 用于主正文 + 旁注栏的长文，右侧展示注释、定义、补充说明。
@@ -169,6 +175,16 @@ description: Use when the answer will likely exceed three terminal paragraphs or
 也就是说：
 - **正文主版式只保留 narrative / sidenotes 两类**
 - 标题、摘要、引用、对比更适合作为插入模块，而不是再定义成新的主页面模板
+- 默认不要用编号眉题、固定刊物身份、报纸 issue number 或所有 section 都相同的 uppercase 标签来制造层级
+
+## 生成前检查清单
+
+- 这篇内容在单栏中是否能连续读完，行长是否大致落在 65–75ch？
+- section 标题是否已经足够表达结构，是否真的需要 kicker 或编号？
+- 页面是否只承诺当前脚本已实现的能力？
+- 主题切换、键盘焦点、reduced motion、移动端降级是否仍然成立？
+- 正文、muted 文本和小字号 accent 文本是否满足可读对比度？
+- 外部字体、MathJax 等依赖是否确实必要？
 
 ## 示例 1：叙述型长文
 
