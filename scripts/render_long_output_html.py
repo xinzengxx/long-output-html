@@ -408,8 +408,12 @@ def main():
   <style>
     :root {{
       --font-serif: "Songti SC", "STSong", "Noto Serif CJK SC", "Source Han Serif SC", Georgia, serif;
+      --font-body: "PingFang SC", "Hiragino Sans GB", "Noto Sans CJK SC", "Source Han Sans SC", "Microsoft YaHei", sans-serif;
       --font-sans: -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
       --font-mono: "JetBrainsMono Nerd Font", "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      --page-width: 1080px;
+      --reading-width: 70ch;
+      --reading-size: clamp(1.02rem, 0.96rem + 0.22vw, 1.12rem);
     }}
 
     :root[data-theme=\"light\"] {{
@@ -445,14 +449,18 @@ def main():
     * {{ box-sizing: border-box; }}
     html, body {{ margin: 0; padding: 0; scroll-behavior: smooth; }}
     body {{
-      font-family: var(--font-serif);
-      background: var(--bg);
+      font-family: var(--font-body);
+      background:
+        radial-gradient(circle at 20% -10%, color-mix(in srgb, var(--accent-soft) 52%, transparent), transparent 34rem),
+        linear-gradient(180deg, color-mix(in srgb, var(--bg) 92%, #fff 8%), var(--bg));
       color: var(--ink);
-      padding: 40px 20px 100px;
+      padding: 48px 20px 104px;
       transition: background-color 0.4s ease, color 0.4s ease;
       text-rendering: optimizeLegibility;
       -webkit-font-smoothing: antialiased;
       -moz-osx-font-smoothing: grayscale;
+      font-kerning: normal;
+      font-variant-east-asian: proportional-width;
     }}
 
     #reading-progress {{
@@ -501,38 +509,41 @@ def main():
     :root[data-theme=\"dark\"] .icon-moon {{ display: none; }}
 
     .document-shell {{
-      max-width: 1120px;
+      width: min(var(--page-width), 100%);
       margin: 0 auto;
     }}
 
     .masthead {{
-      border-bottom: 1px solid var(--rule-strong);
-      padding-bottom: 36px;
-      margin-bottom: 42px;
+      max-width: 920px;
+      border-bottom: 1px solid var(--rule-soft);
+      padding: 0 0 42px;
+      margin-bottom: 38px;
     }}
     .masthead-meta {{
-      margin-bottom: 18px;
+      margin-bottom: 20px;
       color: var(--ink-soft);
       font-family: var(--font-sans);
-      font-size: 0.84rem;
+      font-size: 0.78rem;
       line-height: 1.7;
+      letter-spacing: 0.03em;
     }}
     .masthead h1 {{
-      max-width: 880px;
+      max-width: 860px;
       margin: 0;
       font-family: var(--font-serif);
-      font-size: clamp(2.6rem, 6.2vw, 5.2rem);
+      font-size: clamp(2.35rem, 5.3vw, 4.75rem);
       font-weight: 700;
-      line-height: 1;
-      letter-spacing: -0.035em;
+      line-height: 1.08;
+      letter-spacing: -0.055em;
       color: var(--ink);
       text-wrap: balance;
     }}
     .subtitle {{
-      margin: 18px 0 0;
-      max-width: 780px;
-      font-size: 1.3rem;
-      line-height: 1.7;
+      margin: 22px 0 0;
+      max-width: 760px;
+      font-size: clamp(1.08rem, 0.98rem + 0.35vw, 1.28rem);
+      line-height: 1.9;
+      letter-spacing: 0.01em;
       color: var(--ink-soft);
     }}
     .tag-row {{
@@ -557,123 +568,162 @@ def main():
       font-family: var(--font-sans);
       font-size: 0.72rem;
       font-weight: 700;
-      letter-spacing: 0.04em;
+      letter-spacing: 0.08em;
       color: var(--accent-text);
     }}
 
     .lead-section {{
-      padding-bottom: 36px;
-      margin-bottom: 42px;
-      border-bottom: 1px solid var(--rule-strong);
+      max-width: 880px;
+      padding: 24px 0 38px;
+      margin-bottom: 56px;
+      border-bottom: 1px solid var(--rule-soft);
     }}
     .eyebrow {{
       display: inline-block;
-      margin-bottom: 16px;
+      margin-bottom: 18px;
       padding-bottom: 4px;
       border-bottom: 1px solid var(--rule-soft);
     }}
     .lead-list {{
-      max-width: 76ch;
+      max-width: 82ch;
     }}
-    .summary-list {{ margin: 0; padding-left: 1.15em; }}
+    .summary-list {{
+      margin: 0;
+      padding: 0;
+      list-style: none;
+      display: grid;
+      gap: 10px;
+    }}
     .summary-list li {{
-      margin-bottom: 12px;
-      font-size: 1.04rem;
-      line-height: 1.85;
-      padding-left: 0.2em;
+      position: relative;
+      margin: 0;
+      padding: 13px 16px 13px 28px;
+      border-left: 2px solid color-mix(in srgb, var(--accent) 58%, transparent);
+      background: color-mix(in srgb, var(--surface) 76%, transparent);
+      font-size: 1rem;
+      line-height: 1.82;
+      letter-spacing: 0.01em;
+    }}
+    .summary-list li::before {{
+      content: "";
+      position: absolute;
+      left: 13px;
+      top: 1.62em;
+      width: 4px;
+      height: 4px;
+      border-radius: 50%;
+      background: var(--accent-text);
     }}
 
-    .articles-container {{ display: grid; gap: 64px; }}
+    .articles-container {{ display: grid; gap: 72px; }}
     .module {{
-      padding-bottom: 64px;
+      padding-bottom: 72px;
       border-bottom: 1px solid var(--rule-soft);
     }}
     .module:last-child {{ border-bottom: none; padding-bottom: 0; }}
-    .module-header {{ margin-bottom: 28px; }}
+    .module-header, .section-header {{ margin-bottom: 28px; }}
+    .section-kicker {{ margin-bottom: 10px; }}
     .module-title, .section-title {{
-      margin: 12px 0 0;
+      max-width: 820px;
+      margin: 0;
       font-family: var(--font-serif);
-      font-size: clamp(2.2rem, 4.2vw, 3.7rem);
-      font-weight: 600;
-      line-height: 1.02;
-      letter-spacing: -0.03em;
+      font-size: clamp(1.9rem, 3.6vw, 3.25rem);
+      font-weight: 650;
+      line-height: 1.16;
+      letter-spacing: -0.045em;
       text-wrap: balance;
     }}
     .module-intro, .section-lead {{
       max-width: 760px;
-      margin: 16px 0 0;
-      font-size: 1.08rem;
-      line-height: 1.9;
+      margin: 18px 0 0;
+      font-size: 1.02rem;
+      line-height: 1.92;
+      letter-spacing: 0.01em;
       color: var(--ink-soft);
     }}
     .section-meta {{
       display: flex;
       align-items: center;
       gap: 10px;
-      margin-top: 18px;
+      margin-top: 16px;
       color: var(--ink-soft);
       font-family: var(--font-sans);
-      font-size: 0.75rem;
-      letter-spacing: 0.02em;
+      font-size: 0.72rem;
+      letter-spacing: 0.03em;
     }}
     .meta-dot {{ color: var(--rule-soft); }}
 
     .body-layout {{ display: grid; gap: 32px; }}
     .body-layout-narrative {{ gap: 24px; }}
     .body-layout-sidenotes {{
-      grid-template-columns: minmax(0, 2.35fr) minmax(220px, 0.95fr);
-      gap: 36px;
+      grid-template-columns: minmax(0, 2.2fr) minmax(230px, 0.85fr);
+      gap: 44px;
       align-items: start;
     }}
     .article-body {{
-      font-size: 1.06rem;
-      line-height: 2;
+      font-family: var(--font-body);
+      font-size: var(--reading-size);
+      line-height: 2.05;
       color: var(--ink);
-      letter-spacing: 0.01em;
+      letter-spacing: 0.015em;
       word-break: break-word;
       overflow-wrap: anywhere;
+      hanging-punctuation: allow-end;
     }}
     .article-body.narrative-body {{
-      max-width: 74ch;
+      max-width: var(--reading-width);
     }}
-    .article-body p {{ margin: 0 0 1.65em; }}
+    .article-body p {{
+      margin: 0 0 1.55em;
+      text-align: start;
+    }}
+    .article-body p + p {{ margin-top: -0.18em; }}
     .article-body h1, .article-body h2, .article-body h3, .article-body h4, .article-body h5, .article-body h6 {{
-      margin: 2.05em 0 0.75em;
+      max-width: 32em;
+      margin: 2.2em 0 0.82em;
       font-family: var(--font-serif);
-      line-height: 1.28;
-      font-weight: 600;
-      letter-spacing: -0.012em;
+      line-height: 1.34;
+      font-weight: 650;
+      letter-spacing: -0.026em;
       color: var(--ink);
+      text-wrap: balance;
     }}
-    .article-body h1 {{ font-size: 1.82rem; }}
-    .article-body h2 {{ font-size: 1.48rem; }}
-    .article-body h3 {{ font-size: 1.24rem; color: var(--ink-soft); }}
-    .article-body h4 {{ font-size: 1.08rem; color: var(--ink-soft); }}
-    .article-body hr {{ border: none; border-top: 1px solid var(--rule-soft); margin: 2em 0; }}
-    .article-body a {{ color: var(--accent); text-decoration: none; border-bottom: 1px solid color-mix(in srgb, var(--accent) 38%, transparent); }}
+    .article-body h1 {{ font-size: clamp(1.58rem, 1.18rem + 1.1vw, 2.1rem); }}
+    .article-body h2 {{ font-size: clamp(1.36rem, 1.08rem + 0.72vw, 1.72rem); }}
+    .article-body h3 {{ font-size: 1.18rem; color: var(--ink); }}
+    .article-body h4 {{ font-size: 1.04rem; color: var(--ink-soft); }}
+    .article-body hr {{ border: none; border-top: 1px solid var(--rule-soft); margin: 2.4em 0; }}
+    .article-body a {{ color: var(--accent-text); text-decoration: none; border-bottom: 1px solid color-mix(in srgb, var(--accent) 42%, transparent); }}
     .article-body a:hover {{ border-bottom-color: var(--accent); }}
-    .article-body strong {{ font-weight: 700; }}
-    .article-body em {{ font-style: italic; }}
+    .article-body strong {{ font-weight: 700; color: color-mix(in srgb, var(--ink) 88%, var(--accent-text)); }}
+    .article-body em {{ font-style: normal; color: var(--accent-text); }}
     .article-body blockquote {{
       margin: 34px 0;
-      padding: 22px 24px;
-      border-top: 1px solid var(--rule-soft);
-      border-bottom: 1px solid var(--rule-soft);
-      background: color-mix(in srgb, var(--accent-soft) 52%, transparent);
-      font-style: italic;
+      padding: 20px 24px 20px 26px;
+      border-left: 3px solid var(--accent);
+      background: color-mix(in srgb, var(--accent-soft) 54%, transparent);
       color: var(--ink);
-      font-size: 1.15rem;
-      line-height: 1.85;
+      font-size: 1.05rem;
+      line-height: 1.9;
     }}
-    .article-body ul, .article-body ol {{ margin-bottom: 1.8em; padding-left: 1.5em; }}
-    .article-body li {{ margin-bottom: 0.75em; }}
-    .article-body table {{ width: 100%; border-collapse: collapse; margin: 1.8em 0; font-size: 0.97em; }}
-    .article-body th, .article-body td {{ border: 1px solid var(--rule-soft); padding: 10px 12px; vertical-align: top; }}
-    .article-body th {{ background: color-mix(in srgb, var(--code-bg) 74%, transparent); text-align: left; font-weight: 600; }}
-    .article-body img {{ max-width: 100%; height: auto; display: block; margin: 1.5em auto; }}
+    .article-body blockquote p {{ margin-bottom: 0.9em; }}
+    .article-body blockquote p:last-child {{ margin-bottom: 0; }}
+    .article-body ul, .article-body ol {{
+      margin: 0 0 1.75em;
+      padding-left: 1.35em;
+    }}
+    .article-body li {{
+      margin-bottom: 0.68em;
+      padding-left: 0.16em;
+    }}
+    .article-body li::marker {{ color: var(--accent-text); }}
+    .article-body table {{ width: 100%; border-collapse: collapse; margin: 2em 0; font-size: 0.94em; line-height: 1.72; }}
+    .article-body th, .article-body td {{ border: 1px solid var(--rule-soft); padding: 11px 13px; vertical-align: top; }}
+    .article-body th {{ background: color-mix(in srgb, var(--code-bg) 72%, transparent); text-align: left; font-weight: 700; }}
+    .article-body img {{ max-width: 100%; height: auto; display: block; margin: 1.7em auto; }}
     code, pre {{ font-family: var(--font-mono); font-size: 0.9em; }}
-    code {{ background: var(--code-bg); padding: 0.2em 0.4em; border-radius: 4px; }}
-    pre {{ background: var(--code-bg); padding: 20px; border-radius: 8px; overflow-x: auto; margin-bottom: 1.8em; }}
+    code {{ background: var(--code-bg); padding: 0.16em 0.38em; border-radius: 5px; }}
+    pre {{ background: var(--code-bg); padding: 18px 20px; border-radius: 10px; overflow-x: auto; margin: 0 0 1.85em; line-height: 1.68; border: 1px solid color-mix(in srgb, var(--rule-soft) 72%, transparent); }}
     mjx-container {{
       color: var(--ink);
       font-size: 1.02em;
@@ -708,13 +758,15 @@ def main():
       top: 28px;
     }}
     .notes-heading {{ margin-bottom: 16px; }}
-    .notes-list {{ display: grid; gap: 18px; }}
+    .notes-list {{ display: grid; gap: 16px; }}
     .note-item {{
       padding: 0 0 16px;
       border-bottom: 1px solid var(--rule-soft);
     }}
     .note-item:last-child {{ padding-bottom: 0; border-bottom: none; }}
-    .note-body {{ color: var(--ink-soft); font-size: 0.97rem; line-height: 1.85; }}
+    .note-label {{ margin-bottom: 7px; }}
+    .note-body {{ color: var(--ink-soft); font-size: 0.92rem; line-height: 1.88; letter-spacing: 0.01em; }}
+    .note-body p {{ margin: 0 0 0.9em; }}
     .note-body p:last-child {{ margin-bottom: 0; }}
 
     .summary-cards {{
@@ -722,105 +774,109 @@ def main():
       padding: 0;
       margin: 0;
       display: grid;
-      gap: 0;
-      border-top: 1px solid var(--rule-strong);
-      border-bottom: 1px solid var(--rule-strong);
+      gap: 12px;
+      max-width: 900px;
     }}
     .summary-card {{
       display: grid;
-      grid-template-columns: 34px minmax(0, 1fr);
-      gap: 18px;
-      padding: 22px 0;
-      border-bottom: 1px solid var(--rule-soft);
+      grid-template-columns: 28px minmax(0, 1fr);
+      gap: 14px;
+      padding: 18px 20px 18px 0;
+      border-top: 1px solid var(--rule-soft);
     }}
-    .summary-card:last-child {{ padding-bottom: 22px; border-bottom: none; }}
-    .summary-copy {{ padding-top: 1px; }}
+    .summary-card:last-child {{ border-bottom: 1px solid var(--rule-soft); }}
+    .summary-copy {{ padding-top: 0; }}
     .summary-card-title {{
-      margin: 0 0 8px;
-      font-size: 1.02rem;
+      margin: 0 0 7px;
+      font-size: 1rem;
       font-family: var(--font-sans);
       font-weight: 700;
       letter-spacing: 0.01em;
     }}
-    .summary-card-text {{ margin: 0; font-size: 1.02rem; line-height: 1.85; color: var(--ink); }}
+    .summary-card-text {{ margin: 0; font-size: 1rem; line-height: 1.86; color: var(--ink); letter-spacing: 0.01em; }}
 
     .module-quote {{
       display: grid;
-      gap: 22px;
-      justify-items: center;
-      text-align: center;
-      padding: 22px 0 58px;
+      gap: 18px;
+      justify-items: start;
+      text-align: left;
+      max-width: 860px;
+      padding: 12px 0 64px;
     }}
-    .quote-rule {{ width: min(760px, 100%); border-top: 1px solid var(--rule-strong); }}
+    .quote-rule {{ width: min(760px, 100%); border-top: 1px solid var(--rule-soft); }}
     .quote-main {{ margin: 0; max-width: 820px; }}
     .quote-mark {{
-      margin: 0 0 -8px;
+      margin: 0 0 -6px;
       color: var(--accent-text);
-      font-size: clamp(2.4rem, 5vw, 3.8rem);
-      line-height: 0.8;
-      opacity: 0.72;
+      font-size: clamp(2rem, 4vw, 3.1rem);
+      line-height: 0.85;
+      opacity: 0.68;
     }}
     .quote-text {{
       margin: 0;
       font-family: var(--font-serif);
-      font-size: clamp(1.9rem, 3.7vw, 3rem);
-      line-height: 1.2;
-      letter-spacing: -0.018em;
+      font-size: clamp(1.52rem, 2.8vw, 2.42rem);
+      line-height: 1.38;
+      letter-spacing: -0.035em;
       text-wrap: balance;
     }}
     .quote-note, .quote-attribution {{
       margin: 0;
-      max-width: 640px;
+      max-width: 680px;
       color: var(--ink-soft);
-      line-height: 1.8;
+      line-height: 1.86;
+      letter-spacing: 0.01em;
     }}
     .quote-attribution {{
       font-family: var(--font-sans);
-      font-size: 0.75rem;
-      letter-spacing: 0.04em;
+      font-size: 0.74rem;
+      letter-spacing: 0.06em;
     }}
 
     .compare-grid {{
       display: grid;
       grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
-      gap: 28px;
+      gap: 22px;
       align-items: stretch;
+      max-width: 980px;
     }}
     .compare-card {{
-      padding: 26px 28px;
-      background: color-mix(in srgb, var(--surface) 78%, var(--bg));
+      padding: 24px 26px;
+      background: color-mix(in srgb, var(--surface) 80%, var(--bg));
+      border: 1px solid var(--rule-soft);
       border-top: 2px solid var(--rule-strong);
-      border-bottom: 1px solid var(--rule-soft);
-      border-left: none;
-      border-right: none;
       box-shadow: none;
     }}
     .compare-card-title {{ margin-bottom: 18px; }}
     .compare-divider {{
-      align-self: stretch;
+      align-self: center;
       display: flex;
       align-items: center;
       color: var(--accent-text);
       font-family: var(--font-sans);
       font-size: 0.72rem;
-      letter-spacing: 0.04em;
+      letter-spacing: 0.08em;
+      writing-mode: vertical-rl;
     }}
-    .compare-list {{ list-style: none; padding: 0; margin: 0; display: grid; gap: 15px; }}
+    .compare-list {{ list-style: none; padding: 0; margin: 0; display: grid; gap: 14px; }}
     .compare-item {{ display: grid; gap: 5px; padding-bottom: 14px; border-bottom: 1px solid var(--rule-soft); }}
     .compare-item:last-child {{ padding-bottom: 0; border-bottom: none; }}
     .compare-label {{
       font-family: var(--font-sans);
       font-size: 0.72rem;
       color: var(--accent-text);
-      letter-spacing: 0.04em;
+      letter-spacing: 0.06em;
     }}
-    .compare-text {{ line-height: 1.78; }}
+    .compare-text {{ line-height: 1.82; letter-spacing: 0.01em; }}
     .compare-takeaway {{
-      margin: 22px 0 0;
-      padding-top: 16px;
-      border-top: 1px solid var(--rule-soft);
+      max-width: 900px;
+      margin: 20px 0 0;
+      padding: 15px 18px;
+      border-left: 2px solid var(--accent);
+      background: color-mix(in srgb, var(--accent-soft) 48%, transparent);
       color: var(--ink-soft);
-      line-height: 1.8;
+      line-height: 1.82;
+      letter-spacing: 0.01em;
     }}
 
     @media (prefers-reduced-motion: reduce) {{
@@ -836,19 +892,40 @@ def main():
     }}
 
     @media (max-width: 980px) {{
-      body {{ padding: 24px 16px 84px; }}
-      .body-layout-sidenotes {{ grid-template-columns: 1fr; }}
-      .notes-rail {{ position: static; border-top: 1px solid var(--rule-soft); padding-top: 20px; }}
-      .compare-grid {{ grid-template-columns: 1fr; }}
-      .compare-divider {{ justify-content: flex-start; padding-left: 2px; }}
+      body {{ padding: 30px 16px 86px; }}
+      .masthead {{ padding-bottom: 34px; margin-bottom: 30px; }}
+      .lead-section {{ margin-bottom: 46px; }}
+      .articles-container {{ gap: 58px; }}
+      .module {{ padding-bottom: 58px; }}
+      .body-layout-sidenotes {{ grid-template-columns: 1fr; gap: 26px; }}
+      .notes-rail {{ position: static; border-top: 1px solid var(--rule-soft); padding-top: 20px; max-width: var(--reading-width); }}
+      .compare-grid {{ grid-template-columns: 1fr; gap: 14px; }}
+      .compare-divider {{ justify-content: flex-start; padding-left: 2px; writing-mode: horizontal-tb; }}
     }}
 
     @media (max-width: 680px) {{
-      .module-title, .section-title {{ font-size: clamp(1.8rem, 8vw, 2.6rem); }}
-      .summary-card {{ grid-template-columns: 1fr; gap: 10px; padding: 18px 0; }}
+      body {{ padding: 24px 14px 78px; }}
+      .theme-toggle {{ right: 18px; bottom: 18px; }}
+      .masthead h1 {{ font-size: clamp(2.05rem, 12vw, 3rem); line-height: 1.12; }}
+      .module-title, .section-title {{ font-size: clamp(1.62rem, 8.6vw, 2.35rem); line-height: 1.2; }}
+      .subtitle, .module-intro, .section-lead {{ line-height: 1.82; }}
+      .summary-list li {{ padding-right: 12px; }}
+      .article-body {{ font-size: 1rem; line-height: 1.96; letter-spacing: 0.01em; }}
+      .article-body p {{ margin-bottom: 1.42em; }}
+      .article-body h1, .article-body h2, .article-body h3, .article-body h4, .article-body h5, .article-body h6 {{ margin-top: 1.85em; }}
+      .summary-card {{ grid-template-columns: 1fr; gap: 8px; padding: 17px 0; }}
       .summary-copy {{ padding-top: 0; }}
-      .quote-text {{ font-size: clamp(1.6rem, 8vw, 2.2rem); }}
-      .compare-card {{ padding: 22px 0; }}
+      .quote-text {{ font-size: clamp(1.45rem, 8vw, 2rem); line-height: 1.42; }}
+      .compare-card {{ padding: 20px 16px; }}
+      pre {{ margin-left: -2px; margin-right: -2px; padding: 16px; }}
+    }}
+
+    @media print {{
+      body {{ background: #fff; padding: 0; }}
+      .theme-toggle, #reading-progress {{ display: none; }}
+      .document-shell {{ width: 100%; }}
+      .module {{ break-inside: avoid; }}
+      .notes-rail {{ position: static; }}
     }}
   </style>
 </head>
