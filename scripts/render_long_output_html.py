@@ -1,4 +1,14 @@
 #!/usr/bin/env python3
+"""Render structured JSON longform output as a self-contained editorial HTML page.
+
+Design system: "green print" — deep green-ink paper (#33452f) with cream type
+(#ece2cb), Songti Black display, seal/woodcut/plate vocabulary, torn-paper
+transitions, and a scroll-driven print-shop motion layer (CSS scroll timelines,
+gated behind prefers-reduced-motion and @supports).
+
+Input: JSON on stdin (schema in skills/long-output-html/SKILL.md).
+Output: writes the HTML file, updates the stamp and sidecar, prints the path.
+"""
 import html
 import json
 import re
@@ -9,16 +19,75 @@ from pathlib import Path
 
 import mistune
 
+try:
+    from pygments.formatters.html import HtmlFormatter
+    from pygments.lexers import get_lexer_by_name
+    from pygments.util import ClassNotFound
+    from pygments.styles import get_style_by_name
+
+    _PYGMENTS_AVAILABLE = True
+except Exception:
+    _PYGMENTS_AVAILABLE = False
+
 DEFAULT_OUTPUT_DIR = "/tmp"
 DEFAULT_OUTPUT_PREFIX = "claude-long-output"
 DEFAULT_STAMP = "/tmp/claude-long-output.stamp"
 DEFAULT_SIDECAR = "/tmp/claude-last-html-path.txt"
-SUPPORTED_SECTION_TYPES = {"body", "summary", "quote", "compare"}
+SUPPORTED_SECTION_TYPES = {"body", "summary", "quote", "compare", "figure"}
 SUPPORTED_BODY_VARIANTS = {"narrative", "sidenotes"}
+SUPPORTED_THEMES = {"green", "paper"}
+CN_NUM = ["壹", "贰", "叁", "肆", "伍", "陆", "柒", "捌", "玖", "拾"]
+
+PRE_CODE_RE = re.compile(
+    r'<pre><code(?: class="language-([\w#+.\-]+)")?>(.*?)</code></pre>', re.DOTALL
+)
+TABLE_WRAP_RE = re.compile(r"<table>.*?</table>", re.DOTALL)
+DROP_CAP_RE = re.compile(r"^(<p[^>]*>)(?!<)([^<\s])([\s\S]*?</p>)")
 
 
 def esc(value) -> str:
     return html.escape(str(value), quote=True)
+
+
+def cn_num(n: int) -> str:
+    return CN_NUM[n - 1] if 1 <= n <= len(CN_NUM) else f"{n:02d}"
+
+
+def _highlight_one(code_html: str, lang: str):
+    if not _PYGMENTS_AVAILABLE or not lang:
+        return None
+    code = html.unescape(code_html)
+    try:
+        lexer = get_lexer_by_name(lang, stripnl=False)
+    except ClassNotFound:
+        return None
+    formatter = HtmlFormatter(nowrap=True)
+    return pygments_highlight(code, lexer, formatter)
+
+
+def pygments_highlight(code, lexer, formatter):
+    from pygments import highlight as _highlight
+
+    return _highlight(code, lexer, formatter)
+
+
+PLAIN_PRE_RE = re.compile(r"<pre><code>(.*?)</code></pre>", re.DOTALL)
+
+
+def highlight_code_blocks(html_str: str) -> str:
+    if "language-" not in html_str:
+        return PLAIN_PRE_RE.sub(
+            r'<div class="code-plate"><pre><code>\1</code></pre></div>', html_str
+        )
+
+    def repl(match):
+        lang = match.group(1) or ""
+        highlighted = _highlight_one(match.group(2), lang)
+        if highlighted is None:
+            return match.group(0)
+        return f'<div class="code-plate"><div class="highlight"><pre><code>{highlighted}</code></pre></div></div>'
+
+    return PRE_CODE_RE.sub(repl, html_str)
 
 
 def markdown_to_html(text: str) -> str:
@@ -28,29 +97,70 @@ def markdown_to_html(text: str) -> str:
         escape=False,
         plugins=["strikethrough", "table", "task_lists", "footnotes"],
     )
-    return renderer(str(text).strip())
+    out = highlight_code_blocks(renderer(str(text).strip()))
+    return TABLE_WRAP_RE.sub(r'<div class="table-wrap">\g<0></div>', out)
 
 
-def list_items(items, class_name="summary-list"):
+def _pygments_css_for_style(style_name, scope: str) -> str:
+    if not _PYGMENTS_AVAILABLE or not style_name:
+        return ""
+    try:
+        css = HtmlFormatter(style=style_name).get_style_defs(".highlight")
+    except Exception:
+        return ""
+    scoped_lines = []
+    for line in css.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("."):
+            scoped_lines.append(f"{scope} {line}")
+        else:
+            scoped_lines.append(line)
+    return "\n".join(scoped_lines)
+
+
+def _pick_pygments_style(candidates):
+    if not _PYGMENTS_AVAILABLE:
+        return None
+    for name in candidates:
+        try:
+            get_style_by_name(name)
+            return name
+        except Exception:
+            continue
+    return None
+
+
+def build_pygments_css() -> str:
+    if not _PYGMENTS_AVAILABLE:
+        return ""
+    style = _pick_pygments_style(["gruvbox-dark", "monokai", "native"])
+    css = _pygments_css_for_style(style, ".code-plate .highlight")
+    overrides = """
+    .code-plate .highlight, .code-plate .highlight pre {
+      background: transparent !important;
+    }"""
+    return f"\n    /* syntax highlighting (pygments, scoped to the code plate) */\n    {css}\n    {overrides}"
+
+
+def list_items(items, class_name="deck-list"):
     if not items:
         return ""
-    lis = "\n".join(f"<li>{esc(x)}</li>" for x in items if str(x).strip())
-    return f'<ul class="{class_name}">{lis}</ul>' if lis else ""
+    lis = []
+    for i, item in enumerate(items, start=1):
+        text = str(item).strip()
+        if text:
+            lis.append(
+                f'<li><span class="deck-idx">{i:02d}</span>'
+                f'<span class="deck-text">{esc(text)}</span></li>'
+            )
+    return f'<ol class="{class_name}">{"".join(lis)}</ol>' if lis else ""
 
 
 def tag_html(tags):
     if not tags:
         return ""
-    chips = "".join(
-        f'<span class="tag">{esc(tag)}</span>' for tag in tags if str(tag).strip()
-    )
-    return f'<div class="tag-row">{chips}</div>' if chips else ""
-
-
-def reading_meta(raw_content: str):
-    word_count = len(re.sub(r"\s+", "", raw_content or ""))
-    read_time = max(1, word_count // 300) if word_count else 1
-    return word_count, read_time
+    chips = " · ".join(esc(tag) for tag in tags if str(tag).strip())
+    return f'<div class="vtags">{chips}</div>' if chips else ""
 
 
 def normalize_body_variant(value, default="narrative"):
@@ -104,11 +214,9 @@ def normalize_text_items(section):
                     normalized.append({"title": "", "text": text})
     if normalized:
         return normalized
-
     raw_content = str(section.get("content") or "").strip()
     if not raw_content:
         return []
-
     for line in raw_content.splitlines():
         cleaned = re.sub(r"^[-*0-9.\s]+", "", line).strip()
         if cleaned:
@@ -123,7 +231,6 @@ def normalize_compare_side(side, fallback_title):
     else:
         title = fallback_title
         items = side or []
-
     normalized_items = []
     for item in items:
         if isinstance(item, dict):
@@ -135,183 +242,919 @@ def normalize_compare_side(side, fallback_title):
             text = str(item).strip()
             if text:
                 normalized_items.append({"label": "", "text": text})
-
     return {"title": title, "items": normalized_items}
 
 
-def render_section_kicker(section, index, prefix="SECTION"):
-    explicit = str(section.get("kicker") or "").strip()
-    if explicit:
-        return f'<div class="section-kicker">{esc(explicit)}</div>'
+def normalize_figure(section):
+    """figure module: tick-rows plate (skeleton from lieflat-charts C1)."""
+    unit_step = section.get("unit_step", 0.1)
+    try:
+        unit_step = abs(float(unit_step)) or 0.1
+    except (TypeError, ValueError):
+        unit_step = 0.1
+    rows = []
+    for i, row in enumerate(section.get("rows") or []):
+        if isinstance(row, dict):
+            label = str(row.get("label") or "").strip()
+            value = row.get("value")
+            display = str(row.get("display") or "").strip()
+            hero = bool(row.get("hero"))
+        else:
+            label, value, display, hero = str(row).strip(), None, "", False
+        if value is None:
+            continue
+        try:
+            value = float(value)
+        except (TypeError, ValueError):
+            continue
+        rows.append(
+            {
+                "label": label or f"{i:02d}",
+                "value": value,
+                "display": display or f"{value:g}",
+                "hero": hero,
+            }
+        )
+    if not rows:
+        return None
+    if not any(row["hero"] for row in rows):
+        rows[-1]["hero"] = True
+    return {
+        "title": str(section.get("title") or "").strip(),
+        "sub": str(section.get("sub") or section.get("lead") or "").strip(),
+        "source": str(section.get("source") or "").strip(),
+        "unit_step": unit_step,
+        "rows": rows,
+    }
 
-    sequence = str(section.get("sequence") or "").strip()
-    if sequence:
-        label = str(section.get("sequence_label") or prefix).strip()
-        return f'<div class="section-kicker">{esc(label)} {esc(sequence)}</div>'
 
-    if section.get("numbered") is True:
-        label = str(section.get("sequence_label") or prefix).strip()
-        return f'<div class="section-kicker">{esc(label)} {index:02d}</div>'
+def render_tickrows(fig):
+    """Chart skeleton from lieflat-charts basics-gallery C1 · tick rows:
+    1 tick = 1 unit, row-end big number, dot marks every fifth, seeded jitter."""
+    import random as _r
 
-    return ""
+    rnd = _r.Random(42)
+    unit_step = fig["unit_step"]
+    rows = fig["rows"]
+    X0, PX = 150, 8.4
+    out = []
+    for i, row in enumerate(rows):
+        y = 44 + i * 62
+        ticks = max(1, min(70, round(abs(row["value"]) / unit_step)))
+        opacity = "1" if row["hero"] else ".55"
+        label_op = "1" if row["hero"] else ".75"
+        out.append('<g class="figrow">')
+        out.append('<g class="tickband" aria-hidden="true">')
+        out.append(
+            f'<text x="128" y="{y + 4}" text-anchor="end" font-size="12.5" '
+            f'font-weight="600" letter-spacing=".08em" fill="currentColor" '
+            f'opacity="{label_op}">{esc(row["label"])}</text>'
+        )
+        out.append(
+            f'<line x1="{X0}" y1="{y + 9}" x2="{X0 + ticks * PX:.1f}" y2="{y + 9}" '
+            f'stroke="currentColor" stroke-width=".7" opacity=".28"/>'
+        )
+        for k in range(ticks):
+            x = X0 + k * PX + PX / 2
+            h = 9 + rnd.random() * 6
+            o = (0.9 + rnd.random() * 0.1) if row["hero"] else (0.55 + rnd.random() * 0.45)
+            out.append(
+                f'<line x1="{x:.1f}" y1="{y + 9}" x2="{x:.1f}" y2="{y + 9 - h:.1f}" '
+                f'stroke="currentColor" stroke-width="1.1" opacity="{o:.2f}"/>'
+            )
+            if k % 5 == 4:
+                out.append(
+                    f'<circle cx="{x:.1f}" cy="{y + 13.5}" r="1" '
+                    f'fill="currentColor" opacity=".55"/>'
+                )
+        out.append("</g>")
+        out.append(
+            f'<text x="{X0 + ticks * PX + 12:.1f}" y="{y + 5}" font-size="15" '
+            f'font-weight="800" fill="currentColor">{esc(row["display"])}</text>'
+        )
+        out.append("</g>")
+    out.append(
+        f'<text x="320" y="232" text-anchor="middle" font-size="9.5" '
+        f'font-weight="600" letter-spacing=".14em" fill="currentColor" opacity=".55">'
+        f'ONE TICK = {unit_step:g} · DOT MARKS EVERY FIFTH</text>'
+    )
+    aria = (
+        "Tick-row chart. "
+        + "; ".join(f'{r["label"]} {r["display"]}' for r in rows)
+        + f". One tick equals {unit_step:g}."
+    )
+    return (
+        '<svg class="fig-svg" viewBox="0 0 640 240" xmlns="http://www.w3.org/2000/svg" '
+        f'role="img" aria-label="{esc(aria)}">' + "".join(out) + "</svg>"
+    )
+
+
+def add_drop_cap(content_html: str):
+    """Wrap the first glyph of the first paragraph as a display drop cap.
+
+    A visually-hidden copy of the glyph keeps the text stream intact for
+    screen readers (the visible cap is aria-hidden)."""
+    match = DROP_CAP_RE.search(content_html)
+    if not match:
+        return content_html
+    open_tag, first_char, rest = match.group(1), match.group(2), match.group(3)
+    if not re.match(r"[\u4e00-\u9fffA-Za-z0-9]", first_char):
+        return content_html
+    replacement = (
+        f'{open_tag}<span class="dropcap" aria-hidden="true">{first_char}</span>'
+        f'<span class="sr-first-char">{first_char}</span>{rest}'
+    )
+    return content_html[: match.start()] + replacement + content_html[match.end():]
+
+
+def table_label(count: int) -> str:
+    return (
+        f'<div class="fig-kicker" aria-hidden="true">表版 · {cn_num(count)}'
+        f" &nbsp;&nbsp; SPECIMEN TABLE</div>"
+    )
+
+
+def sunburst(color="currentColor", rays=16, r_out=20, r_in=8.5, size=40):
+    import math
+
+    cx = cy = size / 2
+    pts = []
+    for i in range(2 * rays):
+        a = math.pi * i / rays - math.pi / 2
+        r = r_out if i % 2 == 0 else r_in
+        pts.append(f"{cx + r*math.cos(a):.2f},{cy + r*math.sin(a):.2f}")
+    return (
+        f'<svg viewBox="0 0 {size} {size}" width="{size}" height="{size}" aria-hidden="true">'
+        f'<polygon points="{" ".join(pts)}" fill="{color}"/></svg>'
+    )
+
+
+def torn_edge(paper_above: bool, seed: int, paper="#e8dfcd", ink="#3c523b", h=64):
+    """Torn-paper boundary. `paper` is the sheet colour drawn over `ink`."""
+    import random as _r
+
+    rnd = _r.Random(seed)
+    pts = [(0.0, 28.0)]
+    x = 0.0
+    while x < 1440:
+        x += rnd.randint(10, 24)
+        if x > 1440:
+            x = 1440
+        y = 28 + rnd.randint(-13, 13)
+        pts.append((float(x), float(y)))
+        if rnd.random() < 0.4:
+            pts.append((min(x + rnd.randint(2, 5), 1440), float(y + rnd.randint(-6, 6))))
+    pts.append((1440.0, 28.0))
+    if paper_above:
+        d = "M0,0 L1440,0 " + " ".join(f"L{x},{y}" for x, y in reversed(pts)) + " Z"
+    else:
+        d = f"M0,{h} L1440,{h} " + " ".join(f"L{x},{y}" for x, y in reversed(pts)) + " Z"
+    return (
+        f'<div class="tear" style="background:{ink}" aria-hidden="true">'
+        f'<svg viewBox="0 0 1440 {h}" preserveAspectRatio="none">'
+        f'<path fill="{paper}" d="{d}"/></svg></div>'
+    )
+
+
+def branch_path(color="currentColor"):
+    import math as _m
+
+    p0, p1, p2 = (24, 192), (86, 118), (182, 22)
+
+    def bez(t):
+        return ((1 - t) ** 2 * p0[0] + 2 * (1 - t) * t * p1[0] + t * t * p2[0],
+                (1 - t) ** 2 * p0[1] + 2 * (1 - t) * t * p1[1] + t * t * p2[1])
+
+    def tangent(t):
+        dx = 2 * (1 - t) * (p1[0] - p0[0]) + 2 * t * (p2[0] - p1[0])
+        dy = 2 * (1 - t) * (p1[1] - p0[1]) + 2 * t * (p2[1] - p1[1])
+        return _m.atan2(dy, dx)
+
+    parts = [
+        f'<path d="M{p0[0]},{p0[1]} Q{p1[0]},{p1[1]} {p2[0]},{p2[1]}" fill="none" '
+        f'stroke="{color}" stroke-width="3.6" stroke-linecap="round"/>'
+    ]
+    leaves = 7
+    for i in range(leaves):
+        t = 0.14 + i * (0.72 / (leaves - 1))
+        x, y = bez(t)
+        ang = tangent(t)
+        fade = 1 - 0.45 * i / leaves
+        rx, ry = 21 * fade + 6, 7 * fade + 2.5
+        for side in (1, -1):
+            if i == leaves - 1 and side == -1:
+                continue
+            off = 15 - 3 * i / leaves
+            nx, ny = _m.cos(ang + _m.pi / 2), _m.sin(ang + _m.pi / 2)
+            lx, ly = x + nx * off * side, y + ny * off * side
+            la = _m.degrees(ang) + 42 * side
+            parts.append(
+                f'<ellipse cx="{lx:.1f}" cy="{ly:.1f}" rx="{rx:.1f}" ry="{ry:.1f}" '
+                f'fill="{color}" transform="rotate({la:.1f} {lx:.1f} {ly:.1f})"/>'
+            )
+    tx, ty = bez(1.0)
+    ta = _m.degrees(tangent(1.0))
+    parts.append(
+        f'<ellipse cx="{tx + 8:.1f}" cy="{ty - 6:.1f}" rx="16" ry="5.5" fill="{color}" '
+        f'transform="rotate({ta:.1f} {tx + 8:.1f} {ty - 6:.1f})"/>'
+    )
+    return (
+        '<svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">'
+        + "".join(parts)
+        + "</svg>"
+    )
+
+
+def fan(color="currentColor", rays=30, r_in=150, r_out=360):
+    import math as _m
+
+    parts = []
+    for i in range(rays):
+        a = -160 + i * (320 / (rays - 1))
+        parts.append(f'<line x1="0" y1="{-r_in}" x2="0" y2="{-r_out}" transform="rotate({a:.1f})"/>')
+    arc = (
+        f"M {r_in * _m.cos(_m.radians(-160)):.1f} {r_in * _m.sin(_m.radians(-160)):.1f} "
+        f"A {r_in} {r_in} 0 1 1 {r_in * _m.cos(_m.radians(-20)):.1f} "
+        f"{r_in * _m.sin(_m.radians(-20)):.1f}"
+    )
+    parts.append(f'<path d="{arc}" fill="none"/>')
+    return (
+        '<svg viewBox="-400 -400 800 420" xmlns="http://www.w3.org/2000/svg" '
+        f'stroke="{color}" stroke-width="2.4" fill="none" aria-hidden="true">'
+        + "".join(parts)
+        + "</svg>"
+    )
+
+
+CSS_BASE = r"""
+    :root{
+      --paper:#e8dfcd; --bg:#33452f; --ink:#ece2cb; --ink-soft:rgba(236,226,203,.70);
+      --hairline:rgba(236,226,203,.22); --rule-ink:#d5caa9;
+      --accent:#ece2cb; --accent-deep:#3c523b; --on-accent:#33452f;
+      --sheet-bg:#e8dfcd; --sheet-ink:#3c523b;
+      --sheet-line:rgba(60,82,59,.35); --sheet-line-soft:rgba(60,82,59,.15);
+      --sheet-seal-bg:#ece2cb; --sheet-seal-fg:#3c523b;
+      --panel:rgba(236,226,203,.07); --ghost-page:rgba(236,226,203,.08);
+      --fig-bg:#e8dfcd; --fig-ink:#3c523b;
+      --font-display:"Songti SC","STSong",serif;
+      --font-body:"PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+      --font-serif:"Songti SC","STSong",Georgia,serif;
+      --font-label:"PingFang SC",sans-serif;
+      --font-mono:"JetBrainsMono Nerd Font","JetBrains Mono",ui-monospace,Menlo,monospace;
+    }
+    [data-theme="paper"]{
+      --bg:#e8dfcd; --ink:#3c523b; --ink-soft:rgba(60,82,59,.72);
+      --hairline:rgba(60,82,59,.24); --rule-ink:#3c4a38;
+      --accent:#3c523b; --accent-deep:#3c523b; --on-accent:#ece2cb;
+      --sheet-bg:#3c523b; --sheet-ink:#ece2cb;
+      --sheet-line:rgba(236,226,203,.32); --sheet-line-soft:rgba(236,226,203,.15);
+      --sheet-seal-bg:#ece2cb; --sheet-seal-fg:#3c523b;
+      --panel:rgba(60,82,59,.06); --ghost-page:rgba(60,82,59,.10);
+      --fig-bg:#3c523b; --fig-ink:#ece2cb;
+    }
+    [data-theme="paper"] .tear{display:none}
+    *{box-sizing:border-box} html,body{margin:0;padding:0}
+    ::selection{background:rgba(236,226,203,.28);color:#f5efdd}
+    .spread ::selection{background:rgba(60,82,59,.22)}
+    body{background:var(--bg);color:var(--ink);font-family:var(--font-body);
+      font-size:17px;line-height:1.85;-webkit-font-smoothing:antialiased;font-kerning:normal}
+    body::after{content:"";position:fixed;inset:0;pointer-events:none;z-index:999;opacity:.10;mix-blend-mode:soft-light;
+      background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='260' height='260'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='260' height='260' filter='url(%23n)'/%3E%3C/svg%3E");
+      background-size:260px 260px}
+    .top-rule{height:4px;background:#ece2cb}
+    .shell{max-width:1160px;margin:0 auto;padding:0 44px}
+
+    /* ---- cover ---- */
+    .cover{position:relative;padding:30px 0 0;text-align:center}
+    .cover-meta{display:flex;justify-content:space-between;align-items:flex-start;text-align:left;
+      font-family:var(--font-label);font-size:12.5px;font-weight:600;letter-spacing:.2em;color:var(--ink-soft)}
+    .seal{width:48px;height:48px;background:var(--accent);color:var(--on-accent);
+      font-family:"Kaiti SC","Kaiti TC",serif;font-weight:700;font-size:26px;line-height:1;
+      display:grid;place-items:center;transform:rotate(-4deg);position:relative}
+    .seal::after{content:"";position:absolute;inset:3px;border:1px solid currentColor;opacity:.5}
+    .cover .seal{margin-top:-10px}
+    .ghost{position:absolute;top:-50px;right:0;font-family:var(--font-display);font-weight:900;
+      font-size:370px;line-height:1;color:rgba(236,226,203,.04);pointer-events:none;user-select:none;z-index:0;
+      -webkit-text-stroke:2px rgba(236,226,203,.34)}
+    .cover-fan{position:absolute;left:50%;top:118px;transform:translateX(-50%);width:780px;
+      pointer-events:none;user-select:none;z-index:0}
+    .cover-fan svg{display:block;width:100%;height:auto}
+    .cover-meta{position:relative;z-index:2;align-items:center}
+    .cover-meta::before{content:"";flex:1;height:1px;background:var(--hairline);margin-right:22px}
+    .cover-meta::after{content:"";flex:1;height:1px;background:var(--hairline);margin-left:22px}
+    .orn-row{margin-top:38px;display:flex;align-items:center;justify-content:center;gap:14px;position:relative;z-index:1}
+    .orn-row .ol,.orn-row .or{width:110px;height:1px;background:rgba(236,226,203,.35)}
+    .orn-row .od{width:7px;height:7px;background:#ece2cb;transform:rotate(45deg)}
+    .orn-row .seal-mini{margin-left:4px}
+    .sunmark{display:block;margin:0 auto}
+    h1.title{position:relative;z-index:1;margin:30px auto 0;font-family:var(--font-display);font-weight:900;
+      font-size:84px;line-height:1.14;max-width:16em}
+      text-wrap:balance
+    .standfirst{position:relative;z-index:1;margin:26px auto 0;max-width:28em;font-family:var(--font-serif);
+      font-size:20px;line-height:1.8;color:var(--ink-soft)}
+    .branch.c1b{bottom:-40px;right:140px;width:195px;opacity:.5;transform:rotate(-158deg)}
+    .branch.c4{right:-16px;bottom:120px;width:210px;opacity:.13;transform:rotate(-118deg);color:var(--ink)}
+    .vtags{position:absolute;right:0;top:250px;writing-mode:vertical-rl;
+      font-family:var(--font-label);font-size:11px;font-weight:700;letter-spacing:.42em;
+      color:var(--accent);border-left:1px solid var(--hairline);padding-left:12px;height:230px;z-index:1}
+    .rule-double{height:7px;border-top:3px solid var(--rule-ink);border-bottom:1px solid var(--rule-ink);position:relative}
+    .rule-double::after{content:"";position:absolute;left:50%;top:50%;transform:translate(-50%,-50%) rotate(45deg);
+      width:9px;height:9px;background:var(--paper);border:1.5px solid var(--rule-ink)}
+
+    /* ---- tears ---- */
+    .tear svg{display:block;width:100%;height:54px}
+
+    /* ---- module grid: number BELOW the rule, no overlap ---- */
+    .module{padding:56px 0 8px}
+    .module .rule-double{margin-bottom:30px}
+    .mgrid{display:grid;grid-template-columns:118px minmax(0,42em);column-gap:38px;justify-content:center}
+    .sec-num{font-family:var(--font-display);font-weight:900;font-size:104px;line-height:.85;color:var(--accent)}
+    .kicker{display:flex;align-items:center;gap:12px;font-family:var(--font-label);
+      font-size:13px;font-weight:700;letter-spacing:.26em;color:var(--accent)}
+    .kicker::before{content:"";width:7px;height:7px;background:var(--accent);transform:rotate(45deg);flex:none}
+    .kicker::after{content:"";flex:1;height:1px;background:var(--hairline)}
+    .kicker.k-seal::before{display:none}
+    .numseal{flex:none;width:21px;height:21px;background:var(--accent);color:var(--on-accent);
+      font-family:"Kaiti SC","Kaiti TC",serif;font-weight:700;font-size:13px;line-height:1;
+      display:grid;place-items:center;transform:rotate(-4deg)}
+    .body-inner{hanging-punctuation:allow-end first}
+    h2.sec-title{margin:18px 0 0;font-family:var(--font-display);font-weight:900;
+      font-size:42px;line-height:1.24;max-width:20em}
+    .sec-lead{margin:16px 0 0;max-width:40em;font-family:var(--font-serif);
+      font-size:18.5px;line-height:1.85;color:var(--ink-soft)}
+    .body-inner{max-width:42em;margin-top:30px}
+    .body-inner p{margin:0 0 1.35em;text-align:justify;text-indent:2em}
+    .body-inner p.noindent{text-indent:0}
+    .body-inner blockquote p{text-indent:0}
+    .body-inner strong{font-weight:600;text-emphasis:filled circle rgba(236,226,203,.85);
+      -webkit-text-emphasis:filled circle rgba(236,226,203,.85);
+      text-emphasis-position:under right;-webkit-text-emphasis-position:under right}
+    .dropcap{float:left;font-family:var(--font-display);font-weight:900;font-size:58px;line-height:.9;
+      color:var(--accent);margin:8px 14px 0 0}
+
+    /* ---- table: same column width, centered, column rules ---- */
+    .breakout{margin:34px 0 10px;width:42em;max-width:100%}
+    table{width:100%;border-collapse:collapse;font-size:15.5px;line-height:1.75;
+      border-top:2px solid var(--rule-ink);border-bottom:2px solid var(--rule-ink)}
+    th{font-family:var(--font-label);font-size:12.5px;font-weight:700;letter-spacing:.18em;
+      color:var(--accent);text-align:center;padding:12px 14px;border-bottom:2px solid var(--rule-ink)}
+    td{padding:13px 14px;border-bottom:1px solid var(--hairline);vertical-align:top;text-align:center}
+    tr:last-child td{border-bottom:none}
+    th+th,td+td{border-left:1px solid var(--hairline)}
+    td:first-child{font-family:var(--font-serif);font-weight:600}
+
+    /* ---- code plate ---- */
+    .code-plate{margin:34px 0 10px;width:42em;max-width:100%;background:#243020;color:#e3ddc4;
+      padding:22px 26px;position:relative;border-left:3px solid var(--accent)}
+    .code-plate::before{content:"CODE";position:absolute;top:10px;right:14px;
+      font-family:var(--font-label);font-size:10px;font-weight:700;letter-spacing:.34em;opacity:.4}
+    .code-plate pre{margin:0;font-family:var(--font-mono);font-size:14px;line-height:1.8;overflow-x:auto}
+    .code-plate .cm{opacity:.55}
+
+    /* ---- note cards at section bottom ---- */
+    .notecards{display:grid;grid-template-columns:repeat(3,1fr);gap:22px;margin-top:36px;width:42em;max-width:100%}
+    .notecard{border:1px solid var(--hairline);border-top:2px solid var(--accent);padding:16px 18px;background:var(--panel)}
+    .notecard-head{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+    .tag-seal{display:inline-grid;place-items:center;min-width:20px;height:20px;padding:0 5px;
+      background:var(--accent);color:var(--on-accent);font-family:"Kaiti SC",serif;font-weight:700;font-size:12px}
+    .notecard-label{font-family:var(--font-label);font-size:11.5px;font-weight:700;letter-spacing:.2em;color:var(--accent)}
+    .notecard-body{font-size:13.5px;line-height:1.8;color:var(--ink-soft)}
+
+    /* ---- framed pull-quote ---- */
+    .pullframe{margin:34px 0 0;width:42em;max-width:100%;border:1px solid var(--hairline);border-left:3px solid var(--accent);
+      padding:20px 26px;font-family:var(--font-serif);font-size:19px;line-height:1.8;color:var(--accent);font-weight:600;background:var(--panel)}
+
+    /* ---- full-bleed spread ---- */
+    .spread{background:var(--sheet-bg);color:var(--sheet-ink);overflow:hidden}
+    .spread-inner{max-width:900px;margin:0 auto;padding:92px 44px 100px;position:relative}
+    .spread-inner::before{content:"";position:absolute;inset:20px 26px;border:1px solid var(--sheet-line);pointer-events:none}
+    .spread-inner::after{content:"";position:absolute;inset:27px 33px;border:1px solid var(--sheet-line-soft);pointer-events:none}
+    .ghost-q{position:absolute;left:34px;top:6px;font-family:var(--font-serif);font-weight:900;
+      font-size:190px;line-height:1;color:var(--sheet-ink);opacity:.1;pointer-events:none;user-select:none}
+    .ghost-sun{position:absolute;right:48px;bottom:36px;opacity:.28;pointer-events:none;color:var(--sheet-ink)}
+    .spread .kicker{color:var(--accent-deep);position:relative}
+    .spread .kicker::before{background:var(--accent-deep)}
+    .spread .kicker::after{background:var(--sheet-line)}
+    .q-text .ql{display:block}
+    .q-text{margin:26px 0 0;font-family:var(--font-display);font-weight:900;
+      font-size:42px;line-height:1.5;max-width:23em;position:relative}
+    .q-note{margin:22px 0 0;max-width:36em;font-size:15.5px;line-height:1.8;opacity:.92;position:relative}
+    .q-attr{margin:28px 0 0;font-family:var(--font-label);font-size:12px;font-weight:600;letter-spacing:.24em;opacity:.92;position:relative}
+    .seal-mini{display:inline-grid;place-items:center;width:22px;height:22px;background:var(--on-accent);
+      color:var(--accent-deep);font-family:"Kaiti SC",serif;font-weight:700;font-size:13px;margin-left:12px;vertical-align:-4px}
+
+    /* ---- triple ---- */
+    .triple{display:grid;grid-template-columns:repeat(3,1fr);gap:32px;margin-top:34px;width:42em;max-width:100%}
+    .triple .cell{border-top:2px solid var(--rule-ink);padding-top:14px}
+    .cell .idx{font-family:var(--font-label);font-size:13px;font-weight:700;letter-spacing:.14em;color:var(--accent);font-variant-numeric:tabular-nums}
+    .cell h3{margin:8px 0 0;font-family:var(--font-display);font-weight:900;font-size:20px;line-height:1.4}
+    .cell p{margin:8px 0 0;font-size:14px;line-height:1.8;color:var(--ink-soft)}
+
+    /* ---- compare ---- */
+    .compare{display:grid;grid-template-columns:1fr auto 1fr;gap:26px;margin-top:34px;width:42em;max-width:100%}
+    .cmp-card{border-top:2px solid var(--rule-ink);padding-top:16px}
+    .cmp-title{font-family:var(--font-display);font-weight:900;font-size:21px}
+    .cmp-item{padding:12px 0;border-bottom:1px solid var(--hairline)}
+    .cmp-item:last-child{border-bottom:none}
+    .cmp-label{font-family:var(--font-label);font-size:11.5px;font-weight:700;letter-spacing:.22em;color:var(--accent)}
+    .cmp-text{margin-top:4px;font-size:14.5px;line-height:1.75}
+    .cmp-divider{align-self:start;padding-top:18px;writing-mode:vertical-rl;
+      font-family:var(--font-label);font-size:12px;font-weight:700;letter-spacing:.3em;color:var(--accent)}
+    .takeaway{margin:30px 0 0;max-width:42em;font-family:var(--font-serif);font-size:18px;line-height:1.85}
+    .takeaway::before{content:"";display:inline-block;width:10px;height:10px;background:var(--accent);margin-right:12px}
+
+    /* ---- deck ---- */
+    .deck-list{list-style:none;margin:26px 0 0;padding:0;max-width:42em}
+    .deck-list li{display:grid;grid-template-columns:2.4em 1fr;gap:14px;padding:11px 0;border-bottom:1px solid var(--hairline)}
+    .deck-list li:last-child{border-bottom:none}
+    .deck-idx{font-family:var(--font-label);font-size:13px;font-weight:700;color:var(--accent);padding-top:.28em;font-variant-numeric:tabular-nums}
+    .deck-text{font-size:17px;line-height:1.8}
+
+    /* ---- ghost numeral (on paper) ---- */
+    .module{position:relative}
+    .ghost-num{position:absolute;left:calc(50% + 292px);bottom:2px;font-family:var(--font-display);font-weight:900;
+      font-size:200px;line-height:1;color:var(--ghost-page);pointer-events:none;user-select:none;z-index:0}
+    .mgrid{position:relative;z-index:1}
+
+    /* ---- end ---- */
+    .end-band{background:var(--sheet-bg);color:var(--sheet-ink);overflow:hidden}
+    .end-band .band-inner{max-width:860px;margin:0 auto;padding:56px 44px 72px;text-align:center;position:relative}
+    .end-band .sunmark{margin:0 auto 18px}
+    .end-band .seal{background:var(--accent-deep);color:var(--paper);margin:0 auto}
+    .end-band .end-meta{margin-top:22px;font-family:var(--font-label);font-size:11.5px;font-weight:600;letter-spacing:.3em;color:var(--on-accent);opacity:.92}
+
+    /* ---- mobile degradation: single column, scrollable tables ---- */
+    @media (max-width: 860px){
+      body{font-size:16px}
+      .shell{padding:0 22px}
+      .breakout{overflow-x:auto}
+      .mgrid{grid-template-columns:minmax(0,1fr);column-gap:0}
+      .mgrid > div{min-width:0}
+      .sec-num{font-size:60px;margin-bottom:10px}
+      .notecards,.triple,.compare{grid-template-columns:1fr;width:auto}
+      .cmp-divider{writing-mode:horizontal-tb;padding:4px 0}
+      .ghost{font-size:190px;top:-24px;right:0;-webkit-text-stroke-width:1.2px}
+      .ghost-num{display:none}
+      h1.title{font-size:clamp(38px,10.5vw,54px)}
+      .standfirst{font-size:17px}
+      .vtags{display:none}
+      .deck-list li{grid-template-columns:2em 1fr;gap:10px}
+      .code-plate{width:auto}
+      .rule-double::after{width:7px;height:7px}
+    }
+
+    /* ---- v9: green cover + green middle sheet ---- */
+    .cover-wrap{color:var(--ink)}
+    .top-rule{background:var(--accent)}
+    .cover-wrap .cover-meta{color:rgba(236,226,203,.82)}
+    .cover-wrap .cover-meta::before,.cover-wrap .cover-meta::after{background:rgba(236,226,203,.35)}
+    .cover-wrap .cover .seal{background:#ece2cb;color:#3c523b}
+    .cover-wrap .ghost{color:rgba(236,226,203,.05);-webkit-text-stroke-color:rgba(236,226,203,.42)}
+    .cover-wrap .standfirst{color:rgba(236,226,203,.8)}
+    .cover-wrap .vtags{color:var(--on-accent);border-left-color:rgba(236,226,203,.35)}
+    .cover-wrap .orn-row .ol,.cover-wrap .orn-row .or{background:rgba(236,226,203,.35)}
+    .cover-wrap .orn-row .od{background:#ece2cb}
+.cover-wrap .orn-row .seal-mini{background:#ece2cb;color:#3c523b}
+    .cover-wrap .orn-row .seal-mini{background:var(--sheet-seal-bg);color:var(--sheet-seal-fg)}
+    .greensheet .branch.c5{left:-26px;bottom:-30px;right:auto;width:230px;opacity:.22;transform:rotate(14deg)}
+
+    /* ---- figure plate: 图版 (chart skeleton from lieflat-charts C1) ---- */
+    .figure-plate{background:var(--fig-bg);color:var(--fig-ink);padding:24px 28px 18px;
+      margin:36px 0 10px;width:42em;max-width:100%;border-top:2px solid var(--fig-ink)}
+    .fig-kicker{font-family:var(--font-label);font-size:11px;font-weight:700;letter-spacing:.26em;
+      color:var(--fig-ink);opacity:.85;margin-bottom:10px}
+    .fig-title{font-family:var(--font-display);font-weight:900;font-size:21px;line-height:1.4;margin-bottom:4px;color:var(--fig-ink)}
+    .fig-sub{font-size:12.5px;line-height:1.7;color:var(--fig-ink);opacity:.85;margin-bottom:16px}
+    .fig-svg{display:block;width:100%;height:auto}
+    .fig-svg .figrow,.fig-svg .tickband{opacity:1}
+    .fig-src{margin-top:12px;font-family:var(--font-label);font-size:11.5px;font-weight:600;
+      letter-spacing:.12em;color:var(--fig-ink);opacity:.85}
+    .breakout .fig-kicker{margin:-6px 0 8px}
+
+    /* ---- organic layer: botanical branches ---- */
+    .branch{position:absolute;pointer-events:none;user-select:none;z-index:3}
+    .branch svg{display:block;width:100%;height:auto}
+    .branch.c1{top:-24px;left:60px;width:235px;transform:rotate(16deg);color:#ece2cb}
+    .branch.c1 svg{transform-origin:12% 92%}
+    .branch.c2{right:26px;bottom:-12px;width:250px;opacity:.32;transform:rotate(8deg) scaleX(-1);color:var(--sheet-ink)}
+    .branch.c2 svg{transform-origin:80% 90%}
+    .branch.c3{right:4px;top:-28px;width:210px;opacity:.3;transform:rotate(148deg);color:var(--sheet-ink)}
+
+    /* ---- motion layer: 印刷车间 print-shop vocabulary ---- */
+    :root{--ease-out:cubic-bezier(.22,1,.36,1);--ease-stamp:cubic-bezier(.3,1.4,.5,1)}
+    #reading-progress{position:fixed;top:0;left:0;height:3px;width:100%;background:var(--accent);
+      transform-origin:0 50%;transform:scaleX(0);z-index:1200;pointer-events:none}
+    .notecard{transition:transform .18s var(--ease-out),border-color .18s var(--ease-out)}
+    .notecard:hover{transform:translateY(-2px);border-color:var(--accent)}
+    td{transition:background .15s ease}
+    tr:hover td{background:rgba(236,226,203,.06)}
+
+    @media print{
+      #reading-progress{display:none}
+      *,*::before,*::after{animation:none !important}
+      body{background:#fff !important;color:#28211a}
+      body::after,.branch,.cover-fan,.ghost,.ghost-num,.ghost-q,.ghost-sun,.tear,.top-rule,#reading-progress,.reg{display:none !important}
+      .spread,.end-band{background:#fff !important}
+      .spread *,.end-band *{color:#28211a !important}
+      .cover .seal,.end-band .seal,.numseal,.tag-seal,.seal-mini{background:#28211a !important;color:#fff !important;transform:rotate(-4deg)}
+      .code-plate{background:#f0f0f0 !important;color:#28211a !important;border:1px solid #bbb}
+      a{text-decoration:none}
+    }
+
+    /* load sequence: the cover sets the stage (top-of-page = load clock, not scroll) */
+    @media (prefers-reduced-motion: no-preference){
+      .cover-meta{animation:rise .55s var(--ease-out) both}
+      .ghost{animation:fade-in 1.4s ease .1s both}
+      .cover .sunmark{animation:stamp-flat .5s var(--ease-stamp) .38s both}
+      .cover .seal{animation:stamp-tilt .45s var(--ease-stamp) .62s both}
+      h1.title{animation:rise .65s var(--ease-out) .2s both}
+      .standfirst{animation:rise .65s var(--ease-out) .34s both}
+      .vtags{animation:fade-in .9s ease .75s both}
+      @keyframes rise{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:none}}
+      @keyframes fade-in{from{opacity:0}to{opacity:1}}
+      @keyframes stamp-flat{0%{opacity:0;transform:scale(1.55) rotate(-10deg)}55%{opacity:1}100%{opacity:1;transform:none}}
+      @keyframes stamp-tilt{0%{opacity:0;transform:scale(1.55) rotate(-14deg)}55%{opacity:1}100%{opacity:1;transform:rotate(-4deg)}}
+    }
+
+    /* scroll-scrubbed devices: below-the-fold only, transform/opacity/clip-path only */
+    @supports (animation-timeline: view()){
+      @media (prefers-reduced-motion: no-preference){
+        .module .rule-double{transform-origin:0 50%;animation:line-grow 1ms linear both;animation-timeline:view();animation-range:entry 0% entry 45%}
+        .module .rule-double::after{animation:bead-pop 1ms linear both;animation-timeline:view();animation-range:entry 30% entry 70%}
+        .sec-num{animation:lock-up 1ms linear both;animation-timeline:view();animation-range:entry 5% entry 45%}
+        .kicker{animation:slide-in-neg 1ms linear both;animation-timeline:view();animation-range:entry 15% entry 55%}
+        h2.sec-title{animation:lock-up 1ms linear both;animation-timeline:view();animation-range:entry 15% entry 60%}
+        .sec-lead{animation:lock-up-soft 1ms linear both;animation-timeline:view();animation-range:entry 25% entry 70%}
+        .dropcap{animation:stamp-view-flat 1ms linear both;animation-timeline:view();animation-range:entry 20% entry 65%}
+        .code-plate,.pullframe,.triple,.figure-plate{animation:lock-up-soft 1ms linear both;animation-timeline:view();animation-range:entry 10% entry 60%}
+        .figure-plate .figrow{animation:lock-up-soft 1ms linear both;animation-timeline:view()}
+        .figure-plate .figrow:nth-of-type(1){animation-range:entry 0% entry 45%}
+        .figure-plate .figrow:nth-of-type(2){animation-range:entry 15% entry 60%}
+        .figure-plate .figrow:nth-of-type(3){animation-range:entry 30% entry 75%}
+        .figure-plate .figrow .tickband{animation:tick-lay 1ms linear both;animation-timeline:view()}
+        .figure-plate .figrow:nth-of-type(1) .tickband{animation-range:entry 0% entry 45%}
+        .figure-plate .figrow:nth-of-type(2) .tickband{animation-range:entry 15% entry 60%}
+        .figure-plate .figrow:nth-of-type(3) .tickband{animation-range:entry 30% entry 75%}
+        @keyframes tick-lay{from{clip-path:inset(-8px 100% -8px 0)}to{clip-path:inset(-8px 0% -8px 0)}}
+        .notecards .notecard{animation:lock-up-soft 1ms linear both;animation-timeline:view()}
+        .notecards .notecard:nth-child(1){animation-range:entry 10% entry 55%}
+        .notecards .notecard:nth-child(2){animation-range:entry 25% entry 70%}
+        .notecards .notecard:nth-child(3){animation-range:entry 40% entry 85%}
+        .spread{animation:roller 1ms linear both;animation-timeline:view();animation-range:entry 0% cover 35%}
+        .spread .seal-mini{animation:stamp-view-flat 1ms linear both;animation-timeline:view();animation-range:entry 60% cover 30%}
+        .ghost-sun{animation:sun-turn 1ms linear both;animation-timeline:view();animation-range:entry 10% cover 30%}
+        .end-band{animation:roller 1ms linear both;animation-timeline:view();animation-range:entry 0% entry 80%}
+        .end-band .seal{animation:stamp-view-tilt 1ms linear both;animation-timeline:view();animation-range:entry 15% entry 90%}
+        @keyframes line-grow{from{transform:scaleX(0)}to{transform:scaleX(1)}}
+        @keyframes bead-pop{from{opacity:0;transform:translate(-50%,-50%) rotate(45deg) scale(0)}to{opacity:1;transform:translate(-50%,-50%) rotate(45deg) scale(1)}}
+        @keyframes lock-up{from{opacity:0;transform:translateY(20px)}to{opacity:1;transform:none}}
+        @keyframes lock-up-soft{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+        @keyframes slide-in-neg{from{opacity:0;transform:translateX(-10px)}to{opacity:1;transform:none}}
+        @keyframes stamp-view-flat{0%{opacity:0;transform:scale(1.5) rotate(-8deg)}100%{opacity:1;transform:none}}
+        @keyframes stamp-view-tilt{0%{opacity:0;transform:scale(1.5) rotate(-12deg)}100%{opacity:1;transform:rotate(-4deg)}}
+        @keyframes roller{from{clip-path:inset(0 100% 0 0)}to{clip-path:inset(0 0 0 0)}}
+      }
+    }
+    @supports (animation-timeline: scroll()){
+      @media (prefers-reduced-motion: no-preference){
+        #reading-progress{animation:progress-grow linear both;animation-timeline:scroll(root)}
+        @keyframes progress-grow{from{transform:scaleX(0)}to{transform:scaleX(1)}}
+      }
+    }
+
+    /* ---- v6 motion refinements: sequences & layers ---- */
+    .kicker::after{transform-origin:0 50%}
+    @media (prefers-reduced-motion: no-preference){
+      .orn-row{animation:fade-in .8s ease .58s both}
+      .reg{animation:fade-in 1.1s ease .3s both}
+    }
+    @supports (animation-timeline: view()){
+      @media (prefers-reduced-motion: no-preference){
+        .kicker::after{animation:line-grow 1ms linear both;animation-timeline:view();animation-range:entry 20% entry 60%}
+        .kicker .numseal{animation:stamp-view-tilt 1ms linear both;animation-timeline:view();animation-range:entry 8% entry 48%}
+        .deck-list li{animation:lock-up-soft 1ms linear both;animation-timeline:view()}
+        .deck-list li:nth-child(1){animation-range:entry 0% entry 40%}
+        .deck-list li:nth-child(2){animation-range:entry 10% entry 50%}
+        .deck-list li:nth-child(3){animation-range:entry 20% entry 60%}
+        .deck-list li:nth-child(4){animation-range:entry 30% entry 70%}
+        .breakout tbody tr{animation:lock-up-soft 1ms linear both;animation-timeline:view()}
+        .breakout tbody tr:nth-child(1){animation-range:entry 10% entry 50%}
+        .breakout tbody tr:nth-child(2){animation-range:entry 20% entry 60%}
+        .breakout tbody tr:nth-child(3){animation-range:entry 30% entry 70%}
+        .q-text .ql{animation:lock-up 1ms linear both;animation-timeline:view()}
+        .q-text .ql:nth-child(1){animation-range:entry 5% entry 45%}
+        .q-text .ql:nth-child(2){animation-range:entry 22% entry 62%}
+        .notecard .tag-seal{animation:stamp-view-flat 1ms linear both;animation-timeline:view();animation-range:entry 30% cover 25%}
+        @keyframes sun-turn{from{opacity:0;transform:rotate(-70deg) scale(.88)}to{opacity:1;transform:none}}
+      }
+    }
+
+    /* ---- registration marks: 印刷对位线 ---- */
+    .reg{position:absolute;width:16px;height:16px;pointer-events:none;opacity:.4;z-index:4}
+    .reg::before,.reg::after{content:"";position:absolute;background:#ece2cb}
+    .reg::before{left:50%;top:0;width:1.5px;height:100%;transform:translateX(-50%)}
+    .reg::after{top:50%;left:0;height:1.5px;width:100%;transform:translateY(-50%)}
+    .reg.tl{top:16px;left:16px}.reg.tr{top:16px;right:16px}
+    .reg.bl{bottom:16px;left:16px}.reg.br{bottom:16px;right:16px}
+
+    /* ---- v7: organic layer motion ---- */
+    @media (prefers-reduced-motion: no-preference){
+      .branch.c1 svg{animation:sprout 1.3s var(--ease-out) .5s both}
+      @keyframes sprout{from{opacity:0;transform:rotate(30deg) scale(.9)}to{opacity:1;transform:none}}
+    }
+    @supports (animation-timeline: view()){
+      @media (prefers-reduced-motion: no-preference){
+        .branch.c2 svg,.branch.c3 svg{transform-origin:50% 95%;animation:sprout-view 1ms linear both;animation-timeline:view()}
+        .branch.c2 svg{animation-range:entry 10% cover 35%}
+        .branch.c3 svg{animation-range:entry 0% entry 85%}
+        @keyframes sprout-view{from{opacity:0;transform:rotate(40deg) scale(.9)}to{opacity:1;transform:none}}
+      }
+    }
+
+    /* ---- v8: cover fan & extra branches ---- */
+    @media (prefers-reduced-motion: no-preference){
+      .cover-fan{animation:fan-in 1.8s var(--ease-out) .05s both}
+      .orn-row .seal-mini{animation:stamp-flat .45s var(--ease-stamp) 1s both}
+      .branch.c1b svg{animation:sprout 1.3s var(--ease-out) .8s both;transform-origin:80% 10%}
+      @keyframes fan-in{from{opacity:0;transform:translateX(-50%) rotate(-14deg) scale(.94)}to{opacity:1;transform:translateX(-50%) rotate(0) scale(1)}}
+    }
+    @supports (animation-timeline: view()){
+      @media (prefers-reduced-motion: no-preference){
+        .branch.c4 svg{transform-origin:50% 90%;animation:sprout-view 1ms linear both;animation-timeline:view();animation-range:entry 15% cover 30%}
+      }
+    }
+    @media (max-width: 860px){
+      .cover-fan{left:22px;right:22px;width:auto;transform:none;top:96px;animation:none;opacity:1}
+      .branch.c1b,.branch.c4{display:none}
+    }
+
+    /* ---- v11: ghost numeral entrance ---- */
+    @supports (animation-timeline: view()){
+      @media (prefers-reduced-motion: no-preference){
+        .ghost-num{animation:fade-in 1ms linear both;animation-timeline:view();animation-range:entry 10% cover 30%}
+        .triple .cell{animation:lock-up-soft 1ms linear both;animation-timeline:view()}
+        .triple .cell:nth-child(1){animation-range:entry 0% entry 50%}
+        .triple .cell:nth-child(2){animation-range:entry 15% entry 65%}
+        .triple .cell:nth-child(3){animation-range:entry 30% entry 80%}
+        .compare .cmp-card:nth-of-type(1){animation:lock-up-soft 1ms linear both;animation-timeline:view();animation-range:entry 5% entry 50%}
+        .compare .cmp-divider{animation:fade-in 1ms linear both;animation-timeline:view();animation-range:entry 25% entry 65%}
+        .compare .cmp-card:nth-of-type(2){animation:lock-up-soft 1ms linear both;animation-timeline:view();animation-range:entry 30% entry 75%}
+        .takeaway{animation:lock-up-soft 1ms linear both;animation-timeline:view();animation-range:entry 35% entry 80%}
+        .spread .q-note{animation:lock-up-soft 1ms linear both;animation-timeline:view();animation-range:entry 45% cover 20%}
+        .spread .q-attr{animation:lock-up-soft 1ms linear both;animation-timeline:view();animation-range:entry 55% cover 30%}
+      }
+    }
+
+    /* production utilities */
+    .sr-first-char{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+    .sec-num-label{font-size:64px;line-height:1.05;padding-top:6px}
+    .breakout .fig-kicker{color:var(--accent);opacity:.85}
+    .dropcap{user-select:none}
+"""
+
+MAIN_SCRIPT = """
+  <script>
+    const progressBar = document.getElementById('reading-progress');
+    function updateReadingProgress() {
+      if (!progressBar) { return; }
+      const winScroll = document.body.scrollTop || document.documentElement.scrollTop;
+      const height = document.documentElement.scrollHeight - document.documentElement.clientHeight;
+      const progress = height > 0 ? winScroll / height : 0;
+      progressBar.style.transform = 'scaleX(' + Math.min(1, Math.max(0, progress)) + ')';
+    }
+    window.addEventListener('DOMContentLoaded', updateReadingProgress);
+    window.addEventListener('scroll', updateReadingProgress, { passive: true });
+  </script>
+"""
+
+MATHJAX_TEMPLATE = """
+  <script>
+    window.MathJax = {
+      tex: {
+        inlineMath: [['$','$'], ['\\\\(','\\\\)']],
+        displayMath: [['$$','$$'], ['\\\\[','\\\\]']],
+        processEscapes: true,
+        processEnvironments: true,
+        tags: 'ams'
+      },
+      svg: { fontCache: 'global', scale: 1, minScale: 0.5,
+             linebreaks: { automatic: false }, mtextInheritFont: true, merrorInheritFont: true },
+      options: { skipHtmlTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code'] }
+    };
+  </script>
+  <script defer src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-svg.js"></script>
+"""
+
+
+def render_cover(data, reading_minutes):
+    title = esc(data.get("title", "长输出"))
+    # break the display title after a clause mark so CJK line breaks stay word-safe
+    for mark in ("，", "；", "：", ", ", "; "):
+        if mark in title and len(title) <= 24:
+            title = title.replace(mark, mark + "<br/>", 1)
+            break
+    subtitle = str(data.get("subtitle") or "").strip()
+    standfirst = esc(subtitle).replace("\n", "<br/>") if subtitle else ""
+    tags = tag_html(data.get("tags"))
+    seal_char = str(data.get("seal") or (data.get("title") or "读").strip()[:1] or "读")
+    fan_svg = fan()
+    sun_svg = sunburst()
+    branch = branch_path()
+    return f"""
+<div class="cover-wrap">
+<div class="top-rule" aria-hidden="true"></div>
+<header class="cover shell">
+  <span class="reg tl" aria-hidden="true"></span><span class="reg tr" aria-hidden="true"></span><span class="reg bl" aria-hidden="true"></span><span class="reg br" aria-hidden="true"></span>
+  <div class="ghost" aria-hidden="true">{esc(seal_char)}</div>
+  <div class="branch c1" aria-hidden="true">{branch}</div>
+  <div class="cover-meta">
+    <div>{esc(data.get("generated_at_display", ""))} · 全文约 {reading_minutes} 分钟</div>
+    <div class="seal">{esc(seal_char)}</div>
+  </div>
+  <div class="cover-fan" aria-hidden="true">{fan_svg}</div>
+  <div class="sunmark" style="margin-top:44px" aria-hidden="true">{sun_svg}</div>
+  <h1 class="title">{title}</h1>
+  {f'<p class="standfirst">{standfirst}</p>' if standfirst else ''}
+  <div class="orn-row"><span class="ol"></span><span class="od"></span><span class="or"></span><span class="seal-mini">{esc(seal_char)}</span></div>
+  <div class="branch c1b" aria-hidden="true">{branch}</div>
+  {tags}
+</header>
+</div>"""
+
+
+def render_deck(summary):
+    if not summary:
+        return ""
+    deck = list_items(summary)
+    return f"""
+  <section class="module module-deck" style="padding-top:52px">
+    <div class="rule-double"></div>
+    <div class="mgrid">
+      <div class="sec-num sec-num-label">导读</div>
+      <div>
+        <div class="kicker">本篇脉络</div>
+        {deck}
+      </div>
+    </div>
+  </section>"""
 
 
 def render_body_section(section, index):
     title = esc(section.get("title", "未命名栏目"))
     lead = str(section.get("lead") or "").strip()
-    raw_content = str(section.get("content") or "")
-    body = markdown_to_html(raw_content)
-    word_count, read_time = reading_meta(raw_content)
-    variant = section.get("variant", "narrative")
+    kicker = str(section.get("kicker") or "").strip()
+    content = add_drop_cap(markdown_to_html(str(section.get("content") or "")))
+    for num in reversed(section.get("_table_range") or []):
+        marker = "<div class=\"table-wrap\">"
+        replacement = f'<div class="table-wrap">{table_label(num)}'
+        # replace from the last occurrence backwards keeps numbering in order
+        pos = content.rfind(marker)
+        if pos != -1:
+            content = content[:pos] + replacement + content[pos + len(marker):]
     notes = normalize_notes(section.get("notes"))
-    if variant == "sidenotes" and not notes:
-        variant = "narrative"
-
-    kicker_html = render_section_kicker(section, index)
-    header = f"""
-    <header class=\"section-header\">
-      {kicker_html}
-      <h2 class=\"section-title\">{title}</h2>
-      {f'<p class="section-lead">{esc(lead)}</p>' if lead else ''}
-      <div class=\"section-meta\">
-        <span class=\"meta-item\">约 {read_time} 分钟</span>
-        <span class=\"meta-dot\">•</span>
-        <span class=\"meta-item\">{word_count} 字符</span>
-      </div>
-    </header>
-    """
-
-    if variant == "sidenotes":
-        notes_html = "".join(
-            f"""
-            <article class=\"note-item\">
-              {f'<div class="note-label">{esc(note["label"])}</div>' if note['label'] else ''}
-              <div class=\"note-body\">{markdown_to_html(note['content'])}</div>
-            </article>
-            """
-            for note in notes
+    kicker_html = (
+        f'<div class="kicker k-seal"><span class="numseal">{cn_num(index)}</span>{esc(kicker)}</div>'
+        if kicker
+        else ""
+    )
+    notes_html = ""
+    if notes:
+        cards = "".join(
+            f"""<div class="notecard">
+              <div class="notecard-head"><span class="tag-seal">注</span><span class="notecard-label">{esc(n['label'])}</span></div>
+              <div class="notecard-body">{markdown_to_html(n['content'])}</div>
+            </div>"""
+            for n in notes
         )
-        layout = f"""
-        <div class=\"body-layout body-layout-sidenotes\">
-          <div class=\"article-body\">{body}</div>
-          <aside class=\"notes-rail\">
-            <div class=\"notes-heading\">旁注</div>
-            <div class=\"notes-list\">{notes_html}</div>
-          </aside>
-        </div>
-        """
-    else:
-        layout = f"""
-        <div class=\"body-layout body-layout-narrative\">
-          <div class=\"article-body narrative-body\">{body}</div>
-        </div>
-        """
-
+        notes_html = f'<div class="notecards">{cards}</div>'
+    lead_html = f'<p class="sec-lead">{esc(lead)}</p>' if lead else ""
     return f"""
-    <article class=\"module module-body module-body-{variant}\" id=\"sec-{index}\">
-      {header}
-      {layout}
-    </article>
-    """
+  <section class="module">
+    <div class="rule-double"></div>
+    <div class="mgrid">
+      <div class="sec-num">{index:02d}</div>
+      <div>
+        {kicker_html}
+        <h2 class="sec-title">{title}</h2>
+        {lead_html}
+        <div class="body-inner">{content}</div>
+        {notes_html}
+      </div>
+    </div>
+  </section>"""
 
 
 def render_summary_section(section, index):
-    title = esc(section.get("title") or "重点摘要")
+    title = esc(section.get("title") or "要点")
     intro = str(section.get("intro") or section.get("lead") or "").strip()
     items = normalize_text_items(section)
-    items_html = "".join(
-        f"""
-        <li class=\"summary-card\">
-          <div class=\"summary-index\">•</div>
-          <div class=\"summary-copy\">
-            {f'<h3 class="summary-card-title">{esc(item["title"])}</h3>' if item['title'] else ''}
-            <p class=\"summary-card-text\">{esc(item['text'])}</p>
-          </div>
-        </li>
-        """
+    cells = "".join(
+        f"""<div class="cell"><div class="idx">{i:02d}</div>{f'<h3>{esc(item["title"])}</h3>' if item['title'] else ''}<p>{esc(item['text'])}</p></div>"""
         for i, item in enumerate(items, start=1)
     )
-    kicker_html = render_section_kicker(section, index, "摘要")
+    kicker = str(section.get("kicker") or "要点")
+    intro_html = f'<p class="sec-lead">{esc(intro)}</p>' if intro else ""
     return f"""
-    <section class=\"module module-summary\" id=\"sec-{index}\">
-      <header class=\"module-header\">
-        {kicker_html}
-        <h2 class=\"module-title\">{title}</h2>
-        {f'<p class="module-intro">{esc(intro)}</p>' if intro else ''}
-      </header>
-      <ol class=\"summary-cards\">{items_html}</ol>
-    </section>
-    """
+  <section class="module">
+    <div class="ghost-num" aria-hidden="true">{index:02d}</div>
+    <div class="rule-double"></div>
+    <div class="mgrid">
+      <div class="sec-num">{index:02d}</div>
+      <div>
+        <div class="kicker k-seal"><span class="numseal">{cn_num(index)}</span>{esc(kicker)}</div>
+        <h2 class="sec-title">{title}</h2>
+        {intro_html}
+        <div class="triple">{cells}</div>
+      </div>
+    </div>
+  </section>"""
 
 
-def render_quote_section(section, index):
-    quote = str(section.get("quote") or section.get("content") or "").strip()
+def render_quote_section(section, sheet_in):
+    text = str(section.get("content") or section.get("quote") or "").strip()
     note = str(section.get("note") or section.get("caption") or "").strip()
     attribution = str(section.get("attribution") or "").strip()
-    return f"""
-    <aside class=\"module module-quote\" id=\"sec-{index}\">
-      <div class=\"quote-rule\"></div>
-      <blockquote class=\"quote-main\">
-        <p class=\"quote-mark\">“</p>
-        <p class=\"quote-text\">{esc(quote)}</p>
-      </blockquote>
-      {f'<p class="quote-note">{esc(note)}</p>' if note else ''}
-      {f'<p class="quote-attribution">— {esc(attribution)}</p>' if attribution else ''}
-      <div class=\"quote-rule\"></div>
-    </aside>
-    """
-
-
-def render_compare_items(items):
-    return "".join(
-        f"""
-        <li class=\"compare-item\">
-          {f'<span class="compare-label">{esc(item["label"])}</span>' if item['label'] else ''}
-          <span class=\"compare-text\">{esc(item['text'])}</span>
-        </li>
-        """
-        for item in items
+    kicker = str(section.get("kicker") or "引文")
+    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+    if len(lines) > 1:
+        q_html = "".join(f'<span class="ql">{esc(ln)}</span>' for ln in lines)
+    else:
+        q_html = esc(text)
+    note_html = f'<p class="q-note">{esc(note)}</p>' if note else ""
+    attr_html = (
+        f'<p class="q-attr">—— {esc(attribution)}<span class="seal-mini">印</span></p>'
+        if attribution
+        else '<p class="q-attr"><span class="seal-mini">印</span></p>'
     )
+    return f"""{sheet_in}
+<section class="spread">
+  <div class="spread-inner">
+    <div class="ghost-q" aria-hidden="true">「</div>
+    <div class="ghost-sun" aria-hidden="true">{sunburst(size=130)}</div>
+    <div class="kicker">{esc(kicker)}</div>
+    <p class="q-text">{q_html}</p>
+    {note_html}
+    {attr_html}
+  </div>
+</section>"""
 
 
 def render_compare_section(section, index):
-    title = esc(section.get("title") or "对比")
+    title = esc(section.get("title") or "对照")
     left = normalize_compare_side(section.get("left"), "方案 A")
     right = normalize_compare_side(section.get("right"), "方案 B")
     takeaway = str(section.get("takeaway") or "").strip()
-    kicker_html = render_section_kicker(section, index, "对照")
+    kicker = str(section.get("kicker") or "方案对照")
+
+    def side_html(side):
+        items = "".join(
+            f"""<div class="cmp-item">{f'<div class="cmp-label">{esc(i["label"])}</div>' if i['label'] else ''}<div class="cmp-text">{esc(i['text'])}</div></div>"""
+            for i in side["items"]
+        )
+        return f"""<article class="cmp-card"><div class="cmp-title">{esc(side['title'])}</div>{items}</article>"""
+
+    takeaway_html = f'<p class="takeaway">{esc(takeaway)}</p>' if takeaway else ""
     return f"""
-    <section class=\"module module-compare\" id=\"sec-{index}\">
-      <header class=\"module-header\">
-        {kicker_html}
-        <h2 class=\"module-title\">{title}</h2>
-      </header>
-      <div class=\"compare-grid\">
-        <article class=\"compare-card\">
-          <div class=\"compare-card-title\">{esc(left['title'])}</div>
-          <ul class=\"compare-list\">{render_compare_items(left['items'])}</ul>
-        </article>
-        <div class=\"compare-divider\">对照</div>
-        <article class=\"compare-card\">
-          <div class=\"compare-card-title\">{esc(right['title'])}</div>
-          <ul class=\"compare-list\">{render_compare_items(right['items'])}</ul>
-        </article>
+  <section class="module">
+    <div class="rule-double"></div>
+    <div class="mgrid">
+      <div class="sec-num">{index:02d}</div>
+      <div>
+        <div class="kicker k-seal"><span class="numseal">{cn_num(index)}</span>{esc(kicker)}</div>
+        <h2 class="sec-title">{title}</h2>
+        <div class="compare">
+          {side_html(left)}
+          <div class="cmp-divider">对照</div>
+          {side_html(right)}
+        </div>
+        {takeaway_html}
       </div>
-      {f'<p class="compare-takeaway">{esc(takeaway)}</p>' if takeaway else ''}
-    </section>
-    """
+    </div>
+  </section>"""
 
 
-def render_module(section, index, default_variant):
-    normalized = normalize_section(section, default_variant)
-    section_type = normalized["type"]
-    if section_type == "summary":
-        return render_summary_section(normalized, index)
-    if section_type == "quote":
-        return render_quote_section(normalized, index)
-    if section_type == "compare":
-        return render_compare_section(normalized, index)
-    return render_body_section(normalized, index)
+def render_figure_section(section, index):
+    fig = normalize_figure(section)
+    if not fig:
+        return ""
+    kicker = str(section.get("kicker") or "图版")
+    sub = f'<div class="fig-sub">{esc(fig["sub"])}</div>' if fig["sub"] else ""
+    source = f'<div class="fig-src">{esc(fig["source"])}</div>' if fig["source"] else ""
+    return f"""
+  <section class="module">
+    <div class="mgrid">
+      <div></div>
+      <div>
+    <div class="figure-plate">
+      <div class="fig-kicker">{esc(kicker)} · {cn_num(index)} &nbsp;&nbsp; FIGURE</div>
+      <div class="fig-title">{esc(fig['title'])}</div>
+      {sub}
+      {render_tickrows(fig)}
+      {source}
+    </div>
+      </div>
+    </div>
+  </section>"""
 
 
 def build_default_output_path() -> str:
@@ -320,19 +1163,50 @@ def build_default_output_path() -> str:
     return str(Path(DEFAULT_OUTPUT_DIR) / f"{DEFAULT_OUTPUT_PREFIX}-{timestamp}-{suffix}.html")
 
 
+def render_sections(sections):
+    """Render the section list, weaving cream quote sheets in and out with
+    torn-paper boundaries so every colour change keeps the tear grammar."""
+    blocks = []
+    sheet_open = False
+    for section in sections:
+        stype = section["type"]
+        index = section["_index"]
+        if stype == "quote":
+            blocks.append(render_quote_section(section, torn_edge(paper_above=True, seed=3)))
+            sheet_open = True
+            continue
+        if sheet_open:
+            blocks.append(torn_edge(paper_above=False, seed=9))
+            sheet_open = False
+        if stype == "figure":
+            blocks.append(render_figure_section(section, index))
+        elif stype == "summary":
+            blocks.append(render_summary_section(section, index))
+        elif stype == "compare":
+            blocks.append(render_compare_section(section, index))
+        else:
+            blocks.append(render_body_section(section, index))
+    if sheet_open:
+        blocks.append(torn_edge(paper_above=False, seed=9))
+    return "".join(blocks)
+
+
 def main():
     raw = sys.stdin.read().strip()
     if not raw:
         raise SystemExit("Expected JSON on stdin")
     data = json.loads(raw)
 
-    title = data.get("title", "Claude 长输出")
+    title = data.get("title", "长输出")
     subtitle = data.get("subtitle", "")
     summary = data.get("summary", [])
     sections = data.get("sections", [])
     appendix = data.get("appendix", [])
     tags = data.get("tags", [])
     body_variant = normalize_body_variant(data.get("body_variant"), "narrative")
+    theme = str(data.get("theme") or "green").strip().lower()
+    if theme not in SUPPORTED_THEMES:
+        theme = "green"
     output = data.get("output") or build_default_output_path()
     stamp = data.get("stamp", DEFAULT_STAMP)
     sidecar = data.get("sidecar", DEFAULT_SIDECAR)
@@ -354,644 +1228,67 @@ def main():
         + [str(section.get("content") or section.get("quote") or "") for section in sections]
         + [str(x) for x in appendix or []]
     )
+    total_chars = len(re.sub(r"\s+", "", raw_search))
+    reading_minutes = max(1, total_chars // 300) if total_chars else 1
     math_enabled = bool(data.get("math")) or bool(
         re.search(r"\$\$|\\\(|\\\)|\\\[|\\\]|\\begin\{", raw_search)
     )
-    mathjax_html = (
-        """
-  <script>
-    window.MathJax = {
-      tex: {
-        inlineMath: [['$','$'], ['\\\\(','\\\\)']],
-        displayMath: [['$$','$$'], ['\\\\[','\\\\]']],
-        processEscapes: true,
-        processEnvironments: true,
-        tags: 'ams'
-      },
-      svg: {
-        fontCache: 'global',
-        scale: 1,
-        minScale: 0.5,
-        linebreaks: { automatic: false },
-        mtextInheritFont: true,
-        merrorInheritFont: true
-      },
-      options: {
-        skipHtmlTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code']
-      }
-    };
-  </script>
-  <script defer src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-svg.js"></script>
-"""
-        if math_enabled
-        else ""
-    )
+    mathjax_html = MATHJAX_TEMPLATE if math_enabled else ""
 
-    subtitle_html = f'<div class="subtitle">{esc(subtitle)}</div>' if subtitle else ""
-    summary_html = (
-        f"""
-    <section class=\"lead-section\">
-      <div class=\"eyebrow\">导读摘要</div>
-      <div class=\"lead-list\">{list_items(summary)}</div>
-    </section>
-    """
-        if summary
-        else ""
+    normalized = []
+    for i, section in enumerate(sections or [], start=1):
+        section = normalize_section(section, body_variant)
+        section["_index"] = i
+        section["_table_range"] = []
+        normalized.append(section)
+
+    # 表版 numbering: count tables per body section in document order
+    table_counter = 0
+    for section in normalized:
+        if section["type"] != "body":
+            continue
+        count = len(TABLE_WRAP_RE.findall(markdown_to_html(str(section.get("content") or ""))))
+        if count:
+            section["_table_range"] = list(range(table_counter + 1, table_counter + count + 1))
+            table_counter += count
+
+    cover_html = render_cover(
+        {
+            "title": title,
+            "subtitle": subtitle,
+            "tags": tags,
+            "generated_at_display": display_date,
+        },
+        reading_minutes,
     )
+    deck_html = render_deck(summary)
+    articles_html = render_sections(normalized)
 
     html_doc = f"""<!doctype html>
-<html lang=\"zh-CN\" data-theme=\"light\">
+<html lang="zh-CN" data-theme="{theme}">
 <head>
-  <meta charset=\"UTF-8\" />
-  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\" />
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>{esc(title)}</title>
-  <style>
-    :root {{
-      --font-serif: "Songti SC", "STSong", "Noto Serif CJK SC", "Source Han Serif SC", Georgia, serif;
-      --font-body: "PingFang SC", "Hiragino Sans GB", "Noto Sans CJK SC", "Source Han Sans SC", "Microsoft YaHei", sans-serif;
-      --font-sans: -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
-      --font-mono: "JetBrainsMono Nerd Font", "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-      --page-width: 1080px;
-      --reading-width: 70ch;
-      --reading-size: clamp(1.02rem, 0.96rem + 0.22vw, 1.12rem);
-    }}
-
-    :root[data-theme=\"light\"] {{
-      --bg: #f5f1e6;
-      --surface: rgba(255, 252, 246, 0.62);
-      --ink: #2d2926;
-      --ink-soft: #6f665f;
-      --rule-strong: #292522;
-      --rule-soft: #d8ccbc;
-      --accent: #b26a3d;
-      --accent-text: #8a4d2d;
-      --accent-soft: rgba(178, 106, 61, 0.12);
-      --code-bg: #e8e0d3;
-      --progress: #b26a3d;
-      --shadow: 0 20px 50px rgba(61, 48, 36, 0.06);
-    }}
-
-    :root[data-theme=\"dark\"] {{
-      --bg: #1f1b18;
-      --surface: rgba(35, 31, 28, 0.8);
-      --ink: #ded6cc;
-      --ink-soft: #9f9489;
-      --rule-strong: #d2c7bb;
-      --rule-soft: #4a433c;
-      --accent: #d7a27c;
-      --accent-text: #e1b18f;
-      --accent-soft: rgba(215, 162, 124, 0.14);
-      --code-bg: #2c2722;
-      --progress: #d7a27c;
-      --shadow: none;
-    }}
-
-    * {{ box-sizing: border-box; }}
-    html, body {{ margin: 0; padding: 0; scroll-behavior: smooth; }}
-    body {{
-      font-family: var(--font-body);
-      background:
-        radial-gradient(circle at 20% -10%, color-mix(in srgb, var(--accent-soft) 52%, transparent), transparent 34rem),
-        linear-gradient(180deg, color-mix(in srgb, var(--bg) 92%, #fff 8%), var(--bg));
-      color: var(--ink);
-      padding: 48px 20px 104px;
-      transition: background-color 0.4s ease, color 0.4s ease;
-      text-rendering: optimizeLegibility;
-      -webkit-font-smoothing: antialiased;
-      -moz-osx-font-smoothing: grayscale;
-      font-kerning: normal;
-      font-variant-east-asian: proportional-width;
-    }}
-
-    #reading-progress {{
-      position: fixed;
-      top: 0;
-      left: 0;
-      height: 3px;
-      width: 100%;
-      background: var(--progress);
-      z-index: 1001;
-      transform: scaleX(0);
-      transform-origin: left center;
-      transition: transform 0.15s ease-out;
-    }}
-
-    .theme-toggle {{
-      position: fixed;
-      right: 30px;
-      bottom: 30px;
-      width: 44px;
-      height: 44px;
-      border: 1px solid var(--rule-soft);
-      border-radius: 50%;
-      background: var(--surface);
-      color: var(--ink-soft);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      cursor: pointer;
-      z-index: 1000;
-      opacity: 0.55;
-      transition: opacity 0.2s ease, color 0.2s ease, border-color 0.2s ease, background-color 0.2s ease;
-      box-shadow: var(--shadow);
-      backdrop-filter: blur(8px);
-    }}
-    .theme-toggle:hover {{ opacity: 1; color: var(--ink); border-color: var(--ink-soft); }}
-    .theme-toggle:focus-visible {{
-      outline: 2px solid var(--accent-text);
-      outline-offset: 4px;
-      opacity: 1;
-    }}
-    .theme-toggle svg {{ width: 20px; height: 20px; }}
-    :root[data-theme=\"light\"] .icon-sun {{ display: none; }}
-    :root[data-theme=\"light\"] .icon-moon {{ display: block; }}
-    :root[data-theme=\"dark\"] .icon-sun {{ display: block; }}
-    :root[data-theme=\"dark\"] .icon-moon {{ display: none; }}
-
-    .document-shell {{
-      width: min(var(--page-width), 100%);
-      margin: 0 auto;
-    }}
-
-    .masthead {{
-      max-width: 920px;
-      border-bottom: 1px solid var(--rule-soft);
-      padding: 0 0 42px;
-      margin-bottom: 38px;
-    }}
-    .masthead-meta {{
-      margin-bottom: 20px;
-      color: var(--ink-soft);
-      font-family: var(--font-sans);
-      font-size: 0.78rem;
-      line-height: 1.7;
-      letter-spacing: 0.03em;
-    }}
-    .masthead h1 {{
-      max-width: 860px;
-      margin: 0;
-      font-family: var(--font-serif);
-      font-size: clamp(2.35rem, 5.3vw, 4.75rem);
-      font-weight: 700;
-      line-height: 1.08;
-      letter-spacing: -0.055em;
-      color: var(--ink);
-      text-wrap: balance;
-    }}
-    .subtitle {{
-      margin: 22px 0 0;
-      max-width: 760px;
-      font-size: clamp(1.08rem, 0.98rem + 0.35vw, 1.28rem);
-      line-height: 1.9;
-      letter-spacing: 0.01em;
-      color: var(--ink-soft);
-    }}
-    .tag-row {{
-      display: flex;
-      gap: 10px;
-      flex-wrap: wrap;
-      margin-top: 18px;
-    }}
-    .tag {{
-      padding: 6px 10px;
-      border: 1px solid var(--rule-soft);
-      border-radius: 999px;
-      background: var(--accent-soft);
-      color: var(--ink-soft);
-      font-family: var(--font-sans);
-      font-size: 0.74rem;
-      line-height: 1.4;
-      letter-spacing: 0.02em;
-    }}
-
-    .eyebrow, .section-kicker, .notes-heading, .compare-card-title, .note-label, .summary-index {{
-      font-family: var(--font-sans);
-      font-size: 0.72rem;
-      font-weight: 700;
-      letter-spacing: 0.08em;
-      color: var(--accent-text);
-    }}
-
-    .lead-section {{
-      max-width: 880px;
-      padding: 24px 0 38px;
-      margin-bottom: 56px;
-      border-bottom: 1px solid var(--rule-soft);
-    }}
-    .eyebrow {{
-      display: inline-block;
-      margin-bottom: 18px;
-      padding-bottom: 4px;
-      border-bottom: 1px solid var(--rule-soft);
-    }}
-    .lead-list {{
-      max-width: 82ch;
-    }}
-    .summary-list {{
-      margin: 0;
-      padding: 0;
-      list-style: none;
-      display: grid;
-      gap: 10px;
-    }}
-    .summary-list li {{
-      position: relative;
-      margin: 0;
-      padding: 13px 16px 13px 28px;
-      border-left: 2px solid color-mix(in srgb, var(--accent) 58%, transparent);
-      background: color-mix(in srgb, var(--surface) 76%, transparent);
-      font-size: 1rem;
-      line-height: 1.82;
-      letter-spacing: 0.01em;
-    }}
-    .summary-list li::before {{
-      content: "";
-      position: absolute;
-      left: 13px;
-      top: 1.62em;
-      width: 4px;
-      height: 4px;
-      border-radius: 50%;
-      background: var(--accent-text);
-    }}
-
-    .articles-container {{ display: grid; gap: 72px; }}
-    .module {{
-      padding-bottom: 72px;
-      border-bottom: 1px solid var(--rule-soft);
-    }}
-    .module:last-child {{ border-bottom: none; padding-bottom: 0; }}
-    .module-header, .section-header {{ margin-bottom: 28px; }}
-    .section-kicker {{ margin-bottom: 10px; }}
-    .module-title, .section-title {{
-      max-width: 820px;
-      margin: 0;
-      font-family: var(--font-serif);
-      font-size: clamp(1.9rem, 3.6vw, 3.25rem);
-      font-weight: 650;
-      line-height: 1.16;
-      letter-spacing: -0.045em;
-      text-wrap: balance;
-    }}
-    .module-intro, .section-lead {{
-      max-width: 760px;
-      margin: 18px 0 0;
-      font-size: 1.02rem;
-      line-height: 1.92;
-      letter-spacing: 0.01em;
-      color: var(--ink-soft);
-    }}
-    .section-meta {{
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      margin-top: 16px;
-      color: var(--ink-soft);
-      font-family: var(--font-sans);
-      font-size: 0.72rem;
-      letter-spacing: 0.03em;
-    }}
-    .meta-dot {{ color: var(--rule-soft); }}
-
-    .body-layout {{ display: grid; gap: 32px; }}
-    .body-layout-narrative {{ gap: 24px; }}
-    .body-layout-sidenotes {{
-      grid-template-columns: minmax(0, 2.2fr) minmax(230px, 0.85fr);
-      gap: 44px;
-      align-items: start;
-    }}
-    .article-body {{
-      font-family: var(--font-body);
-      font-size: var(--reading-size);
-      line-height: 2.05;
-      color: var(--ink);
-      letter-spacing: 0.015em;
-      word-break: break-word;
-      overflow-wrap: anywhere;
-      hanging-punctuation: allow-end;
-    }}
-    .article-body.narrative-body {{
-      max-width: var(--reading-width);
-    }}
-    .article-body p {{
-      margin: 0 0 1.55em;
-      text-align: start;
-    }}
-    .article-body p + p {{ margin-top: -0.18em; }}
-    .article-body h1, .article-body h2, .article-body h3, .article-body h4, .article-body h5, .article-body h6 {{
-      max-width: 32em;
-      margin: 2.2em 0 0.82em;
-      font-family: var(--font-serif);
-      line-height: 1.34;
-      font-weight: 650;
-      letter-spacing: -0.026em;
-      color: var(--ink);
-      text-wrap: balance;
-    }}
-    .article-body h1 {{ font-size: clamp(1.58rem, 1.18rem + 1.1vw, 2.1rem); }}
-    .article-body h2 {{ font-size: clamp(1.36rem, 1.08rem + 0.72vw, 1.72rem); }}
-    .article-body h3 {{ font-size: 1.18rem; color: var(--ink); }}
-    .article-body h4 {{ font-size: 1.04rem; color: var(--ink-soft); }}
-    .article-body hr {{ border: none; border-top: 1px solid var(--rule-soft); margin: 2.4em 0; }}
-    .article-body a {{ color: var(--accent-text); text-decoration: none; border-bottom: 1px solid color-mix(in srgb, var(--accent) 42%, transparent); }}
-    .article-body a:hover {{ border-bottom-color: var(--accent); }}
-    .article-body strong {{ font-weight: 700; color: color-mix(in srgb, var(--ink) 88%, var(--accent-text)); }}
-    .article-body em {{ font-style: normal; color: var(--accent-text); }}
-    .article-body blockquote {{
-      margin: 34px 0;
-      padding: 20px 24px 20px 26px;
-      border-left: 3px solid var(--accent);
-      background: color-mix(in srgb, var(--accent-soft) 54%, transparent);
-      color: var(--ink);
-      font-size: 1.05rem;
-      line-height: 1.9;
-    }}
-    .article-body blockquote p {{ margin-bottom: 0.9em; }}
-    .article-body blockquote p:last-child {{ margin-bottom: 0; }}
-    .article-body ul, .article-body ol {{
-      margin: 0 0 1.75em;
-      padding-left: 1.35em;
-    }}
-    .article-body li {{
-      margin-bottom: 0.68em;
-      padding-left: 0.16em;
-    }}
-    .article-body li::marker {{ color: var(--accent-text); }}
-    .article-body table {{ width: 100%; border-collapse: collapse; margin: 2em 0; font-size: 0.94em; line-height: 1.72; }}
-    .article-body th, .article-body td {{ border: 1px solid var(--rule-soft); padding: 11px 13px; vertical-align: top; }}
-    .article-body th {{ background: color-mix(in srgb, var(--code-bg) 72%, transparent); text-align: left; font-weight: 700; }}
-    .article-body img {{ max-width: 100%; height: auto; display: block; margin: 1.7em auto; }}
-    code, pre {{ font-family: var(--font-mono); font-size: 0.9em; }}
-    code {{ background: var(--code-bg); padding: 0.16em 0.38em; border-radius: 5px; }}
-    pre {{ background: var(--code-bg); padding: 18px 20px; border-radius: 10px; overflow-x: auto; margin: 0 0 1.85em; line-height: 1.68; border: 1px solid color-mix(in srgb, var(--rule-soft) 72%, transparent); }}
-    mjx-container {{
-      color: var(--ink);
-      font-size: 1.02em;
-      line-height: 1.35;
-    }}
-    mjx-container[jax="SVG"][display="true"] {{
-      display: block;
-      max-width: 100%;
-      margin: 1.35em 0;
-      padding: 0.35em 0;
-      overflow-x: auto;
-      overflow-y: hidden;
-      white-space: nowrap;
-    }}
-    mjx-container[jax="SVG"][display="true"] svg {{
-      display: block;
-      margin: 0 auto;
-      max-width: none;
-    }}
-    mjx-container[jax="SVG"] > svg {{
-      vertical-align: -0.16em;
-    }}
-    .article-body.narrative-body mjx-container[jax="SVG"][display="true"] {{
-      column-span: all;
-      -webkit-column-span: all;
-    }}
-
-    .notes-rail {{
-      border-top: 1px solid var(--rule-soft);
-      padding-top: 18px;
-      position: sticky;
-      top: 28px;
-    }}
-    .notes-heading {{ margin-bottom: 16px; }}
-    .notes-list {{ display: grid; gap: 16px; }}
-    .note-item {{
-      padding: 0 0 16px;
-      border-bottom: 1px solid var(--rule-soft);
-    }}
-    .note-item:last-child {{ padding-bottom: 0; border-bottom: none; }}
-    .note-label {{ margin-bottom: 7px; }}
-    .note-body {{ color: var(--ink-soft); font-size: 0.92rem; line-height: 1.88; letter-spacing: 0.01em; }}
-    .note-body p {{ margin: 0 0 0.9em; }}
-    .note-body p:last-child {{ margin-bottom: 0; }}
-
-    .summary-cards {{
-      list-style: none;
-      padding: 0;
-      margin: 0;
-      display: grid;
-      gap: 12px;
-      max-width: 900px;
-    }}
-    .summary-card {{
-      display: grid;
-      grid-template-columns: 28px minmax(0, 1fr);
-      gap: 14px;
-      padding: 18px 20px 18px 0;
-      border-top: 1px solid var(--rule-soft);
-    }}
-    .summary-card:last-child {{ border-bottom: 1px solid var(--rule-soft); }}
-    .summary-copy {{ padding-top: 0; }}
-    .summary-card-title {{
-      margin: 0 0 7px;
-      font-size: 1rem;
-      font-family: var(--font-sans);
-      font-weight: 700;
-      letter-spacing: 0.01em;
-    }}
-    .summary-card-text {{ margin: 0; font-size: 1rem; line-height: 1.86; color: var(--ink); letter-spacing: 0.01em; }}
-
-    .module-quote {{
-      display: grid;
-      gap: 18px;
-      justify-items: start;
-      text-align: left;
-      max-width: 860px;
-      padding: 12px 0 64px;
-    }}
-    .quote-rule {{ width: min(760px, 100%); border-top: 1px solid var(--rule-soft); }}
-    .quote-main {{ margin: 0; max-width: 820px; }}
-    .quote-mark {{
-      margin: 0 0 -6px;
-      color: var(--accent-text);
-      font-size: clamp(2rem, 4vw, 3.1rem);
-      line-height: 0.85;
-      opacity: 0.68;
-    }}
-    .quote-text {{
-      margin: 0;
-      font-family: var(--font-serif);
-      font-size: clamp(1.52rem, 2.8vw, 2.42rem);
-      line-height: 1.38;
-      letter-spacing: -0.035em;
-      text-wrap: balance;
-    }}
-    .quote-note, .quote-attribution {{
-      margin: 0;
-      max-width: 680px;
-      color: var(--ink-soft);
-      line-height: 1.86;
-      letter-spacing: 0.01em;
-    }}
-    .quote-attribution {{
-      font-family: var(--font-sans);
-      font-size: 0.74rem;
-      letter-spacing: 0.06em;
-    }}
-
-    .compare-grid {{
-      display: grid;
-      grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
-      gap: 22px;
-      align-items: stretch;
-      max-width: 980px;
-    }}
-    .compare-card {{
-      padding: 24px 26px;
-      background: color-mix(in srgb, var(--surface) 80%, var(--bg));
-      border: 1px solid var(--rule-soft);
-      border-top: 2px solid var(--rule-strong);
-      box-shadow: none;
-    }}
-    .compare-card-title {{ margin-bottom: 18px; }}
-    .compare-divider {{
-      align-self: center;
-      display: flex;
-      align-items: center;
-      color: var(--accent-text);
-      font-family: var(--font-sans);
-      font-size: 0.72rem;
-      letter-spacing: 0.08em;
-      writing-mode: vertical-rl;
-    }}
-    .compare-list {{ list-style: none; padding: 0; margin: 0; display: grid; gap: 14px; }}
-    .compare-item {{ display: grid; gap: 5px; padding-bottom: 14px; border-bottom: 1px solid var(--rule-soft); }}
-    .compare-item:last-child {{ padding-bottom: 0; border-bottom: none; }}
-    .compare-label {{
-      font-family: var(--font-sans);
-      font-size: 0.72rem;
-      color: var(--accent-text);
-      letter-spacing: 0.06em;
-    }}
-    .compare-text {{ line-height: 1.82; letter-spacing: 0.01em; }}
-    .compare-takeaway {{
-      max-width: 900px;
-      margin: 20px 0 0;
-      padding: 15px 18px;
-      border-left: 2px solid var(--accent);
-      background: color-mix(in srgb, var(--accent-soft) 48%, transparent);
-      color: var(--ink-soft);
-      line-height: 1.82;
-      letter-spacing: 0.01em;
-    }}
-
-    @media (prefers-reduced-motion: reduce) {{
-      *,
-      *::before,
-      *::after {{
-        transition-duration: 0.01ms !important;
-        animation-duration: 0.01ms !important;
-        animation-iteration-count: 1 !important;
-        scroll-behavior: auto !important;
-      }}
-      #reading-progress {{ transition: none; }}
-    }}
-
-    @media (max-width: 980px) {{
-      body {{ padding: 30px 16px 86px; }}
-      .masthead {{ padding-bottom: 34px; margin-bottom: 30px; }}
-      .lead-section {{ margin-bottom: 46px; }}
-      .articles-container {{ gap: 58px; }}
-      .module {{ padding-bottom: 58px; }}
-      .body-layout-sidenotes {{ grid-template-columns: 1fr; gap: 26px; }}
-      .notes-rail {{ position: static; border-top: 1px solid var(--rule-soft); padding-top: 20px; max-width: var(--reading-width); }}
-      .compare-grid {{ grid-template-columns: 1fr; gap: 14px; }}
-      .compare-divider {{ justify-content: flex-start; padding-left: 2px; writing-mode: horizontal-tb; }}
-    }}
-
-    @media (max-width: 680px) {{
-      body {{ padding: 24px 14px 78px; }}
-      .theme-toggle {{ right: 18px; bottom: 18px; }}
-      .masthead h1 {{ font-size: clamp(2.05rem, 12vw, 3rem); line-height: 1.12; }}
-      .module-title, .section-title {{ font-size: clamp(1.62rem, 8.6vw, 2.35rem); line-height: 1.2; }}
-      .subtitle, .module-intro, .section-lead {{ line-height: 1.82; }}
-      .summary-list li {{ padding-right: 12px; }}
-      .article-body {{ font-size: 1rem; line-height: 1.96; letter-spacing: 0.01em; }}
-      .article-body p {{ margin-bottom: 1.42em; }}
-      .article-body h1, .article-body h2, .article-body h3, .article-body h4, .article-body h5, .article-body h6 {{ margin-top: 1.85em; }}
-      .summary-card {{ grid-template-columns: 1fr; gap: 8px; padding: 17px 0; }}
-      .summary-copy {{ padding-top: 0; }}
-      .quote-text {{ font-size: clamp(1.45rem, 8vw, 2rem); line-height: 1.42; }}
-      .compare-card {{ padding: 20px 16px; }}
-      pre {{ margin-left: -2px; margin-right: -2px; padding: 16px; }}
-    }}
-
-    @media print {{
-      body {{ background: #fff; padding: 0; }}
-      .theme-toggle, #reading-progress {{ display: none; }}
-      .document-shell {{ width: 100%; }}
-      .module {{ break-inside: avoid; }}
-      .notes-rail {{ position: static; }}
-    }}
+  <style>{CSS_BASE}{build_pygments_css()}
   </style>
 </head>
 <body>
-  <div id=\"reading-progress\"></div>
-
-  <button class=\"theme-toggle\" type=\"button\" onclick=\"toggleTheme()\" aria-label=\"切换到深色主题\" aria-pressed=\"false\" title=\"切换到深色主题\">
-    <svg class=\"icon-sun\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><circle cx=\"12\" cy=\"12\" r=\"5\"></circle><line x1=\"12\" y1=\"1\" x2=\"12\" y2=\"3\"></line><line x1=\"12\" y1=\"21\" x2=\"12\" y2=\"23\"></line><line x1=\"4.22\" y1=\"4.22\" x2=\"5.64\" y2=\"5.64\"></line><line x1=\"18.36\" y1=\"18.36\" x2=\"19.78\" y2=\"19.78\"></line><line x1=\"1\" y1=\"12\" x2=\"3\" y2=\"12\"></line><line x1=\"21\" y1=\"12\" x2=\"23\" y2=\"12\"></line><line x1=\"4.22\" y1=\"19.78\" x2=\"5.64\" y2=\"18.36\"></line><line x1=\"18.36\" y1=\"5.64\" x2=\"19.78\" y2=\"4.22\"></line></svg>
-    <svg class=\"icon-moon\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z\"></path></svg>
-  </button>
-
-  <main class=\"document-shell\">
-    <header class=\"masthead\">
-      <div class=\"masthead-meta\">生成时间：{display_date}</div>
-      <h1>{esc(title)}</h1>
-      {subtitle_html}
-      {tag_html(tags)}
-    </header>
-
-    {summary_html}
-
-    <div class=\"articles-container\">
-      {''.join(render_module(section, i + 1, body_variant) for i, section in enumerate(sections))}
-    </div>
-  </main>
-
-  <script>
-    const themeToggle = document.querySelector('.theme-toggle');
-    const progressBar = document.getElementById('reading-progress');
-
-    function applyTheme(theme) {{
-      const next = theme === 'dark' ? 'dark' : 'light';
-      document.documentElement.setAttribute('data-theme', next);
-      if (themeToggle) {{
-        const isDark = next === 'dark';
-        const label = isDark ? '切换到浅色主题' : '切换到深色主题';
-        themeToggle.setAttribute('aria-label', label);
-        themeToggle.setAttribute('aria-pressed', String(isDark));
-        themeToggle.setAttribute('title', label);
-      }}
-    }}
-
-    function updateReadingProgress() {{
-      if (!progressBar) {{ return; }}
-      const winScroll = document.body.scrollTop || document.documentElement.scrollTop;
-      const height = document.documentElement.scrollHeight - document.documentElement.clientHeight;
-      const progress = height > 0 ? winScroll / height : 0;
-      progressBar.style.transform = 'scaleX(' + Math.min(1, Math.max(0, progress)) + ')';
-    }}
-
-    function toggleTheme() {{
-      const current = document.documentElement.getAttribute('data-theme');
-      const next = current === 'light' ? 'dark' : 'light';
-      applyTheme(next);
-      localStorage.setItem('claude_html_theme', next);
-    }}
-
-    window.addEventListener('DOMContentLoaded', () => {{
-      const savedTheme = localStorage.getItem('claude_html_theme') || 'light';
-      applyTheme(savedTheme);
-      updateReadingProgress();
-    }});
-
-    window.addEventListener('scroll', updateReadingProgress, {{ passive: true }});
-  </script>
-  {mathjax_html}
+<div id="reading-progress"></div>
+{cover_html}
+<main class="shell">
+{deck_html}{articles_html}
+</main>
+{torn_edge(paper_above=True, seed=11)}
+<div class="end-band">
+  <div class="band-inner">
+    <div class="sunmark" aria-hidden="true">{sunburst()}</div>
+    <div class="seal">完</div>
+    <div class="end-meta">{esc(display_date)} · 全文约 {reading_minutes} 分钟</div>
+  </div>
+</div>
+{MAIN_SCRIPT}
+{mathjax_html}
 </body>
 </html>
 """

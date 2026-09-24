@@ -5,7 +5,7 @@ description: Use when the answer will likely exceed three terminal paragraphs or
 
 # long-output-html
 
-将长回答直接渲染到本地 HTML 页面，而不是先在终端输出长正文再二次改写。
+将长回答直接渲染成一本「绿墨印刷编辑部」气质的本地 HTML 页面，而不是先在终端输出长正文再二次改写。
 
 ## 何时必须使用
 
@@ -21,18 +21,20 @@ description: Use when the answer will likely exceed three terminal paragraphs or
 1. **先分诊，后输出**：必须在正文输出前决定是否走 HTML。
 2. **禁止事后补救**：不要先在终端铺长正文，再改成 HTML。
 3. **终端只留摘要**：生成 HTML 后，终端只输出一句话结论、3-7 条摘要、HTML 路径、可选一句阅读建议。
-4. **统一走现有脚本**：只调用 `/Users/xinyuan/.claude/scripts/render_long_output_html.py`。
-5. **只描述当前能力**：不要假设折叠、标签展示或其他未实现交互。
+4. **统一走现有脚本**：只调用安装好的 `render_long_output_html.py`（默认安装于 `~/.claude/scripts/`）。
+5. **只描述当前能力**：不要假设折叠、搜索或其他未实现交互。
 
-## 视觉基准
+## 视觉基准（绿墨印刷编辑部）
 
-- 目标是清晰、低模板感、适合中文技术长文的本地阅读页，而不是伪报纸、杂志封面或重型前端页面。
-- 标题层级要稳定：页面标题负责定调，section 标题负责分段，正文内标题只承担局部层级。
-- `summary` 是导读栏，`quote` 是节奏停顿，`compare` 是左右编辑对照卡；模块要服务理解，不要制造固定装饰语法。
-- 默认正文优先单栏阅读，控制行长和段落节奏；只有短段落、展示性文本或用户明确要求时，才使用多栏。
-- 禁止默认伪报纸 chrome：固定 masthead 文案、`#0001`、重复 `SECTION 01/02/03`、每节 uppercase kicker、过度 editorial 字体组合。
-- 保持少装饰、多留白、单一强调色；避免复杂动画、重阴影、炫技渐变、侧边强调条和未实现的交互承诺。
-- 外部依赖必须克制：字体优先系统回退，MathJax 等脚本只在内容需要或输入显式要求时加载。
+- **全局配色**：绿墨底 `#33452f` × 奶油米文字 `#ece2cb`，宋体 Black（Songti SC 900）做展示级标题，PingFang 做正文；强调即奶油本身，不再引入第二色相。
+- **页面结构即印刷品**：绿底封面（对位线 ✚、幽灵字水印、放射扇、版画枝叶、印章「注」、竖排标签）→ 米字阅读区 → 满版米纸插页（引文）→ 绿色要点区 → 米纸尾声（「完」印）。所有颜色变化处使用撕纸边（SVG），绿↔绿之间连续无痕。
+- **尺度跳差**：封面 84px 展示体大标 + 21px 宋体 standfirst；章节开场 = 左栏 104px 大数字 + 「壹贰叁」中文数字小印 kicker + 44px 标题，跳差 ≥4×。
+- **正文纪律**：42em 版心全部模块同宽对齐；段落两端对齐 + 首行缩进 2 字符；章节首段自动首字下沉；重点词自动着重点（`text-emphasis`）；正文永远静止不参与入场动画。
+- **模块语法**：`body`（正文 + 章末注卡）、`summary`（要点三栏 + 幽灵数字）、`quote`（满版米纸插页 + 双层内框 + 幽灵引号 + 「印」）、`compare`（双卡 + 竖排「对照」+ ■ 结论行）、`figure`（米纸图版，tick-rows 刻线图）。
+- **米纸插页与图版**是仅有的反色时刻；表格自动挂「表版 · N SPECIMEN TABLE」标签，图版自动挂「图版 · N FIGURE」。
+- **动效 = 印刷车间**：分节线划出 + 菱形线珠、章节大数字上版、印章砸落、满版滚墨擦入、刻线逐根排上、顶部阅读进度线。全部为 CSS scroll-driven 动画，只用 transform/opacity/clip-path，正文不参与；`prefers-reduced-motion` 与不支持的浏览器直接呈现完成态。
+- **可访问性**：正文对比度 ≥6:1，次级文字 ≥4.5:1；装饰层全部 `aria-hidden`；图版带 `role="img"` 中文摘要；打印样式强制白纸深字并隐藏装饰层。
+- 外部依赖克制：字体全部系统回退，MathJax 仅在内容含公式时加载，pygments 可用且代码块有语言标注时自动高亮（限定在深色代码板内）。
 
 ## 最小输入结构
 
@@ -42,12 +44,9 @@ description: Use when the answer will likely exceed three terminal paragraphs or
 {
   "title": "页面标题",
   "subtitle": "副标题，可选",
-  "summary": ["3-7 条摘要"],
+  "summary": ["3-7 条导读"],
   "sections": [
-    {
-      "title": "一级栏目标题",
-      "content": "栏目正文，支持多段"
-    }
+    {"title": "一级栏目标题", "content": "栏目正文，支持 Markdown 多段"}
   ],
   "appendix": ["附录内容，可选"],
   "output": "/tmp/claude-long-output-<timestamp>.html"
@@ -55,205 +54,56 @@ description: Use when the answer will likely exceed three terminal paragraphs or
 ```
 
 字段约束：
-- `title`：必填
-- `summary`：建议填写，3-7 条最佳
+- `title`：必填；含逗号/分号的短标题会自动在标点后断行
+- `summary`：建议填写，3-7 条最佳（渲染为「导读」区）
 - `sections`：必填，正文主体
-- `subtitle` / `appendix` / `output`：可选
-- 若不传 `output`，脚本会自动生成唯一 HTML 文件名
+- `appendix` / `output`：可选
 
 ## 增强输入结构（可选）
 
-当前脚本已经支持模块化排版；在不破坏旧输入的前提下，可以额外传以下字段：
-
 ```json
 {
-  "title": "页面标题",
-  "subtitle": "副标题",
-  "summary": ["导读 1", "导读 2", "导读 3"],
+  "theme": "green",
+  "tags": ["EDITORIAL", "TYPOGRAPHY"],
   "body_variant": "narrative",
-  "tags": ["editorial", "longform"],
-  "sections": [
-    {
-      "type": "body",
-      "variant": "narrative",
-      "title": "章节标题",
-      "lead": "章节导语，可选",
-      "content": "多段正文 Markdown"
-    },
-    {
-      "type": "quote",
-      "content": "一句需要被强调的话",
-      "note": "补充解释，可选",
-      "attribution": "署名，可选"
-    },
-    {
-      "type": "summary",
-      "title": "本节要点",
-      "items": [
-        {"title": "要点一", "text": "一句解释"},
-        {"title": "要点二", "text": "一句解释"}
-      ]
-    },
-    {
-      "type": "compare",
-      "title": "方案对比",
-      "left": {
-        "title": "方案 A",
-        "items": [
-          {"label": "优点", "text": "稳定"}
-        ]
-      },
-      "right": {
-        "title": "方案 B",
-        "items": [
-          {"label": "风险", "text": "更复杂"}
-        ]
-      },
-      "takeaway": "一句总结，可选"
-    }
-  ]
+  "sections": ["..."]
 }
 ```
 
 ### 顶层可选字段
 
-- `body_variant`: `"narrative" | "sidenotes"`
-  - 控制正文模块的默认主版式
-  - 默认值为 `"narrative"`
-- `math`: `true | false`
-  - 显式声明页面需要数学公式渲染；不传时脚本可按内容自动判断
-- `tags`: 页面顶部标签列表，可选
+- `theme`: `"green"`（默认，绿墨底米字）| `"paper"`（米色底绿字，正文底色反转；封面保持绿底品牌版式，插页反转为绿底）
+- `tags`: 封面右缘竖排标签
+- `body_variant`: `"narrative" | "sidenotes"`（sidenotes 时注卡折叠在章节底部）
+- `math`: 含公式时自动探测，也可显式 `true`
+- `seal`: 封面印章字，默认取标题首字
 
-### section 可选字段
+### section 类型
 
-- `type`: `"body" | "summary" | "quote" | "compare"`
-  - 不传时默认按 `body` 处理
-- `variant`: `"narrative" | "sidenotes"`
-  - 仅对 `type: "body"` 生效
-  - 不传时继承顶层 `body_variant`
-- `lead`: 正文章节导语，可选
-- `notes`: 仅对 `variant: "sidenotes"` 生效
-  - 支持字符串数组：`["注释 1", "注释 2"]`
-  - 也支持对象数组：`[{"label": "术语", "content": "解释"}]`
-
-### 两种正文主版式
-
-#### 1. `narrative`
-用于纯叙述型长文，视觉上是行长受控的单栏阅读版式。
-
-适合：
-- 连续解释
-- 系统分析
-- 章节式长文主体
-
-不适合：
-- 需要大量旁注、术语解释、补充上下文的内容
-- 主要靠短块并列浏览的展示型内容
-
-#### 2. `sidenotes`
-用于主正文 + 旁注栏的长文，右侧展示注释、定义、补充说明。
-
-适合：
-- 概念解释型内容
-- 方法论文章
-- 带术语定义、补充背景的长文
-
-注意：
-- 如果 `notes` 为空，脚本会自动退回 `narrative`
-- 当前是静态阅读版式，不提供复杂折叠交互
+- `type: "body"`（默认）：`title` + 可选 `kicker` + 可选 `lead` + `content`（Markdown）+ 可选 `notes[]`（章末注卡，`{"label","content"}`）
+- `type: "summary"`：`title` + `items[{"title","text"}]`，渲染为三栏要点 + 幽灵数字
+- `type: "quote"`：满版米纸引文插页；`content`（可用换行分行）、`note`、`attribution`、`kicker`（默认「引文」）
+- `type: "compare"`：`left{title,items}` / `right{title,items}`（item 为 `{"label","text"}`）+ `takeaway`
+- `type: "figure"`：米纸图版，tick-rows 刻线图
+  - `title`：结论式标题（如「跳差从 1.9× 拉开到 5.2×」），不要写「柱状图」
+  - `sub`：图例与单位说明；`source`：来源行
+  - `unit_step`: 每根刻线的单位（默认 0.1）
+  - `rows[{"label","value","display"}]`：`value` 按单位换算刻线数，`display` 为行尾标注；可选 `hero: true` 强调主角行
+  - 1 tick = `unit_step`，刻线数上限 70；数据必须从零起算，禁止断轴
 
 ## 推荐使用方式
 
-建议把页面看成“统一视觉语汇下的多模块长文系统”：
-
-- `summary`：顶部导读摘要
-- `body + narrative`：主叙述
-- `body + sidenotes`：主叙述 + 注释栏
-- `quote`：节奏停顿与关键观点强调
-- `compare`：并列分析与对照说明
-
-也就是说：
-- **正文主版式只保留 narrative / sidenotes 两类**
-- 标题、摘要、引用、对比更适合作为插入模块，而不是再定义成新的主页面模板
-- 默认不要用编号眉题、固定刊物身份、报纸 issue number 或所有 section 都相同的 uppercase 标签来制造层级
+- 把页面看成「统一视觉语汇下的多模块长文系统」：导读定脉络 → body 主叙述（穿插 figure 图版）→ quote 满版停顿 → summary/compare 收束。
+- 图版用于「有真实数据支撑的对比/尺度/计数」；没有数据就不要硬造 figure。
+- 每一节建议给一个 2-6 字的 `kicker`（如「问题的定位」），它会被盖上一枚中文数字小印。
 
 ## 生成前检查清单
 
-- 这篇内容在单栏中是否能连续读完，行长是否大致落在 65–75ch？
-- section 标题是否已经足够表达结构，是否真的需要 kicker 或编号？
-- 页面是否只承诺当前脚本已实现的能力？
-- 主题切换、键盘焦点、reduced motion、移动端降级是否仍然成立？
-- 正文、muted 文本和小字号 accent 文本是否满足可读对比度？
-- 外部字体、MathJax 等依赖是否确实必要？
-
-## 示例 1：叙述型长文
-
-```json
-{
-  "title": "注意力不是稀缺资源，而是排版问题",
-  "subtitle": "用模块化长文重新组织阅读节奏",
-  "summary": [
-    "先定内容角色，再选版式。",
-    "正文主版式只保留两类。",
-    "引用和对比作为插入模块更稳。"
-  ],
-  "body_variant": "narrative",
-  "sections": [
-    {
-      "type": "body",
-      "title": "为什么旧版长文容易显得单调",
-      "lead": "问题不在于颜色太少，而在于所有内容都被迫进入同一个排版壳。",
-      "content": "第一段正文。\n\n第二段正文。\n\n第三段正文。"
-    },
-    {
-      "type": "quote",
-      "content": "先建立模块语法，再做视觉变化。",
-      "note": "这样更适合后续自动分块与稳定套模板。"
-    },
-    {
-      "type": "compare",
-      "title": "旧方式 vs 新方式",
-      "left": {
-        "title": "单一模板",
-        "items": [
-          {"label": "优点", "text": "实现简单"},
-          {"label": "缺点", "text": "长文容易疲劳"}
-        ]
-      },
-      "right": {
-        "title": "模块化模板",
-        "items": [
-          {"label": "优点", "text": "节奏更清楚"},
-          {"label": "成本", "text": "需要更明确的 schema"}
-        ]
-      }
-    }
-  ]
-}
-```
-
-## 示例 2：边注型长文
-
-```json
-{
-  "title": "把解释写进边栏，而不是塞进正文",
-  "subtitle": "边注型长文适合知识增强式阅读",
-  "body_variant": "sidenotes",
-  "sections": [
-    {
-      "type": "body",
-      "variant": "sidenotes",
-      "title": "主叙述与次级语义层要分开",
-      "lead": "边注的价值不是多一栏，而是让次级信息和主叙述脱耦。",
-      "content": "第一段正文。\n\n第二段正文。\n\n第三段正文。",
-      "notes": [
-        {"label": "术语", "content": "次级语义层指不影响主线理解、但会增强理解的补充信息。"},
-        {"label": "提示", "content": "如果没有足够注释材料，就不要强行做边注型。"}
-      ]
-    }
-  ]
-}
-```
+- 终端分诊是否已经决定走 HTML？正文栏是否 42em、约 40 字每行？
+- section 标题 + kicker 是否已足够表达结构？没有数据是否避免了 figure？
+- 引文是否真的值得一次满版停顿？（一页至多 1-2 处）
+- 主题选择：默认 green；需要纸面阅读感时才用 paper。
+- 是否只承诺当前脚本已实现的能力？
 
 ## 执行步骤
 
@@ -262,17 +112,13 @@ description: Use when the answer will likely exceed three terminal paragraphs or
 3. 使用 Bash 调用：
 
 ```bash
-python3 "/Users/xinyuan/.claude/scripts/render_long_output_html.py" <<'EOF'
+python3 "<安装路径>/render_long_output_html.py" <<'EOF'
 <JSON>
 EOF
 ```
 
 4. 记录脚本返回的真实 HTML 路径。
-5. 在终端只输出：
-   - 一句话结论
-   - 3-7 条核心摘要
-   - HTML 路径
-   - 可选一句阅读建议
+5. 在终端只输出：一句话结论、3-7 条核心摘要、HTML 路径、可选一句阅读建议。
 
 ## 与 hook 的关系
 
@@ -290,10 +136,9 @@ EOF
 核心摘要：
 - ...
 - ...
-- ...
 
 HTML 路径：
-- /tmp/claude-long-output-20260401-153000.html
+- /tmp/claude-long-output-20260925-153000-a1b2c3.html
 ```
 
 ## 失败处理
