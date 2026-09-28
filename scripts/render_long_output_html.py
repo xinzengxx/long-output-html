@@ -42,7 +42,6 @@ PRE_CODE_RE = re.compile(
     r'<pre><code(?: class="language-([\w#+.\-]+)")?>(.*?)</code></pre>', re.DOTALL
 )
 TABLE_WRAP_RE = re.compile(r"<table>.*?</table>", re.DOTALL)
-DROP_CAP_RE = re.compile(r"^(<p[^>]*>)(?!<)([^<\s])([\s\S]*?</p>)")
 
 
 def esc(value) -> str:
@@ -349,24 +348,6 @@ def render_tickrows(fig):
     )
 
 
-def add_drop_cap(content_html: str):
-    """Wrap the first glyph of the first paragraph as a display drop cap.
-
-    A visually-hidden copy of the glyph keeps the text stream intact for
-    screen readers (the visible cap is aria-hidden)."""
-    match = DROP_CAP_RE.search(content_html)
-    if not match:
-        return content_html
-    open_tag, first_char, rest = match.group(1), match.group(2), match.group(3)
-    if not re.match(r"[\u4e00-\u9fffA-Za-z0-9]", first_char):
-        return content_html
-    replacement = (
-        f'{open_tag}<span class="dropcap" aria-hidden="true">{first_char}</span>'
-        f'<span class="sr-first-char">{first_char}</span>{rest}'
-    )
-    return content_html[: match.start()] + replacement + content_html[match.end():]
-
-
 def table_label(count: int) -> str:
     return (
         f'<div class="fig-kicker" aria-hidden="true">表版 · {cn_num(count)}'
@@ -480,7 +461,7 @@ def fan(color="currentColor", rays=30, r_in=150, r_out=360):
     parts.append(f'<path d="{arc}" fill="none"/>')
     return (
         '<svg viewBox="-400 -400 800 420" xmlns="http://www.w3.org/2000/svg" '
-        f'stroke="{color}" stroke-width="2.4" fill="none" aria-hidden="true">'
+        f'stroke="{color}" stroke-width="1.5" fill="none" aria-hidden="true">'
         + "".join(parts)
         + "</svg>"
     )
@@ -537,9 +518,10 @@ CSS_BASE = r"""
       font-size:370px;line-height:1;color:rgba(236,226,203,.04);pointer-events:none;user-select:none;z-index:0;
       -webkit-text-stroke:2px rgba(236,226,203,.34)}
     .cover-fan{position:absolute;left:50%;top:118px;transform:translateX(-50%);width:780px;
-      pointer-events:none;user-select:none;z-index:0}
+      opacity:var(--fan-o,.5);pointer-events:none;user-select:none;z-index:0}
     .cover-fan svg{display:block;width:100%;height:auto}
     .cover-meta{position:relative;z-index:2;align-items:center}
+    .meta-nowrap{white-space:nowrap}
     .cover-meta::before{content:"";flex:1;height:1px;background:var(--hairline);margin-right:22px}
     .cover-meta::after{content:"";flex:1;height:1px;background:var(--hairline);margin-left:22px}
     .orn-row{margin-top:38px;display:flex;align-items:center;justify-content:center;gap:14px;position:relative;z-index:1}
@@ -548,15 +530,14 @@ CSS_BASE = r"""
     .orn-row .seal-mini{margin-left:4px}
     .sunmark{display:block;margin:0 auto}
     h1.title{position:relative;z-index:1;margin:30px auto 0;font-family:var(--font-display);font-weight:900;
-      font-size:84px;line-height:1.14;max-width:16em}
-      text-wrap:balance
+      font-size:84px;line-height:1.14;max-width:16em;text-wrap:balance}
     .standfirst{position:relative;z-index:1;margin:26px auto 0;max-width:28em;font-family:var(--font-serif);
-      font-size:20px;line-height:1.8;color:var(--ink-soft)}
+      font-size:21px;line-height:1.8;color:var(--ink-soft);text-wrap:balance}
     .branch.c1b{bottom:-40px;right:140px;width:195px;opacity:.5;transform:rotate(-158deg)}
     .branch.c4{right:-16px;bottom:120px;width:210px;opacity:.13;transform:rotate(-118deg);color:var(--ink)}
     .vtags{position:absolute;right:0;top:250px;writing-mode:vertical-rl;
       font-family:var(--font-label);font-size:11px;font-weight:700;letter-spacing:.42em;
-      color:var(--accent);border-left:1px solid var(--hairline);padding-left:12px;height:230px;z-index:1}
+      color:var(--accent);border-left:1px solid var(--hairline);padding-left:12px;z-index:1}
     .rule-double{height:7px;border-top:3px solid var(--rule-ink);border-bottom:1px solid var(--rule-ink);position:relative}
     .rule-double::after{content:"";position:absolute;left:50%;top:50%;transform:translate(-50%,-50%) rotate(45deg);
       width:9px;height:9px;background:var(--paper);border:1.5px solid var(--rule-ink)}
@@ -586,11 +567,25 @@ CSS_BASE = r"""
     .body-inner p{margin:0 0 1.35em;text-align:justify;text-indent:2em}
     .body-inner p.noindent{text-indent:0}
     .body-inner blockquote p{text-indent:0}
-    .body-inner strong{font-weight:600;text-emphasis:filled circle rgba(236,226,203,.85);
-      -webkit-text-emphasis:filled circle rgba(236,226,203,.85);
-      text-emphasis-position:under right;-webkit-text-emphasis-position:under right}
-    .dropcap{float:left;font-family:var(--font-display);font-weight:900;font-size:58px;line-height:.9;
-      color:var(--accent);margin:8px 14px 0 0}
+    .body-inner h3{margin:1.7em 0 .7em;font-family:var(--font-display);font-weight:900;
+      font-size:23px;line-height:1.45}
+    .body-inner h3:first-child{margin-top:.1em}
+    .body-inner h4{margin:1.6em 0 .5em;font-family:var(--font-label);font-weight:700;font-size:16.5px}
+    .body-inner ul,.body-inner ol{margin:.2em 0 1.35em;padding-left:1.9em}
+    .body-inner li{margin:.4em 0;padding-left:.15em;text-align:justify}
+    .body-inner li::marker{color:var(--ink-soft)}
+    .body-inner ul li::marker{content:"◆";font-size:.6em;color:var(--accent)}
+    .body-inner :not(pre) > code{font-family:var(--font-mono);font-size:.84em;
+      background:var(--panel);border:1px solid var(--hairline);padding:.08em .35em;border-radius:2px;
+      overflow-wrap:break-word}
+    .body-inner a{color:inherit;text-decoration:underline;text-decoration-thickness:1px;
+      text-decoration-color:var(--hairline);text-underline-offset:3px}
+    .body-inner a:hover{text-decoration-color:var(--accent)}
+    .body-inner img{max-width:100%;height:auto}
+    .body-inner blockquote{margin:1.6em 0;padding:.1em 22px;border-left:3px solid var(--accent);
+      color:var(--ink-soft);font-family:var(--font-serif)}
+    .body-inner hr{border:0;height:1px;background:var(--hairline);margin:2.2em 0}
+    .body-inner strong{font-weight:600}
 
     /* ---- table: same column width, centered, column rules ---- */
     .breakout{margin:34px 0 10px;width:42em;max-width:100%}
@@ -672,8 +667,8 @@ CSS_BASE = r"""
 
     /* ---- ghost numeral (on paper) ---- */
     .module{position:relative}
-    .ghost-num{position:absolute;left:calc(50% + 292px);bottom:2px;font-family:var(--font-display);font-weight:900;
-      font-size:200px;line-height:1;color:var(--ghost-page);pointer-events:none;user-select:none;z-index:0}
+    .ghost-num{position:absolute;top:6px;right:-6px;font-family:var(--font-display);font-weight:900;
+      font-size:150px;line-height:1;color:var(--ghost-page);pointer-events:none;user-select:none;z-index:0}
     .mgrid{position:relative;z-index:1}
 
     /* ---- end ---- */
@@ -714,8 +709,7 @@ CSS_BASE = r"""
     .cover-wrap .vtags{color:var(--on-accent);border-left-color:rgba(236,226,203,.35)}
     .cover-wrap .orn-row .ol,.cover-wrap .orn-row .or{background:rgba(236,226,203,.35)}
     .cover-wrap .orn-row .od{background:#ece2cb}
-.cover-wrap .orn-row .seal-mini{background:#ece2cb;color:#3c523b}
-    .cover-wrap .orn-row .seal-mini{background:var(--sheet-seal-bg);color:var(--sheet-seal-fg)}
+.cover-wrap .orn-row .seal-mini{background:var(--sheet-seal-bg);color:var(--sheet-seal-fg)}
     .greensheet .branch.c5{left:-26px;bottom:-30px;right:auto;width:230px;opacity:.22;transform:rotate(14deg)}
 
     /* ---- figure plate: 图版 (chart skeleton from lieflat-charts C1) ---- */
@@ -741,7 +735,7 @@ CSS_BASE = r"""
     .branch.c3{right:4px;top:-28px;width:210px;opacity:.3;transform:rotate(148deg);color:var(--sheet-ink)}
 
     /* ---- motion layer: 印刷车间 print-shop vocabulary ---- */
-    :root{--ease-out:cubic-bezier(.22,1,.36,1);--ease-stamp:cubic-bezier(.3,1.4,.5,1)}
+    :root{--ease-out:cubic-bezier(.22,1,.36,1);--ease-stamp:cubic-bezier(.3,1.4,.5,1);--fan-o:.5}
     #reading-progress{position:fixed;top:0;left:0;height:3px;width:100%;background:var(--accent);
       transform-origin:0 50%;transform:scaleX(0);z-index:1200;pointer-events:none}
     .notecard{transition:transform .18s var(--ease-out),border-color .18s var(--ease-out)}
@@ -785,7 +779,6 @@ CSS_BASE = r"""
         .kicker{animation:slide-in-neg 1ms linear both;animation-timeline:view();animation-range:entry 15% entry 55%}
         h2.sec-title{animation:lock-up 1ms linear both;animation-timeline:view();animation-range:entry 15% entry 60%}
         .sec-lead{animation:lock-up-soft 1ms linear both;animation-timeline:view();animation-range:entry 25% entry 70%}
-        .dropcap{animation:stamp-view-flat 1ms linear both;animation-timeline:view();animation-range:entry 20% entry 65%}
         .code-plate,.pullframe,.triple,.figure-plate{animation:lock-up-soft 1ms linear both;animation-timeline:view();animation-range:entry 10% entry 60%}
         .figure-plate .figrow{animation:lock-up-soft 1ms linear both;animation-timeline:view()}
         .figure-plate .figrow:nth-of-type(1){animation-range:entry 0% entry 45%}
@@ -876,7 +869,7 @@ CSS_BASE = r"""
       .cover-fan{animation:fan-in 1.8s var(--ease-out) .05s both}
       .orn-row .seal-mini{animation:stamp-flat .45s var(--ease-stamp) 1s both}
       .branch.c1b svg{animation:sprout 1.3s var(--ease-out) .8s both;transform-origin:80% 10%}
-      @keyframes fan-in{from{opacity:0;transform:translateX(-50%) rotate(-14deg) scale(.94)}to{opacity:1;transform:translateX(-50%) rotate(0) scale(1)}}
+      @keyframes fan-in{from{opacity:0;transform:translateX(-50%) rotate(-14deg) scale(.94)}to{opacity:var(--fan-o,.5);transform:translateX(-50%) rotate(0) scale(1)}}
     }
     @supports (animation-timeline: view()){
       @media (prefers-reduced-motion: no-preference){
@@ -884,8 +877,8 @@ CSS_BASE = r"""
       }
     }
     @media (max-width: 860px){
-      .cover-fan{left:22px;right:22px;width:auto;transform:none;top:96px;animation:none;opacity:1}
-      .branch.c1b,.branch.c4{display:none}
+      .cover-fan{left:22px;right:22px;width:auto;transform:none;top:96px;animation:none;opacity:var(--fan-o,.5)}
+      .branch.c1,.branch.c1b,.branch.c4{display:none}
     }
 
     /* ---- v11: ghost numeral entrance ---- */
@@ -906,10 +899,8 @@ CSS_BASE = r"""
     }
 
     /* production utilities */
-    .sr-first-char{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
     .sec-num-label{font-size:64px;line-height:1.05;padding-top:6px}
     .breakout .fig-kicker{color:var(--accent);opacity:.85}
-    .dropcap{user-select:none}
 """
 
 MAIN_SCRIPT = """
@@ -946,6 +937,17 @@ MATHJAX_TEMPLATE = """
 """
 
 
+def pick_seal_char(title: str) -> str:
+    """Seal glyph: prefer a CJK character; fall back to uppercase Latin."""
+    for ch in title:
+        if "\u4e00" <= ch <= "\u9fff" or "\u3400" <= ch <= "\u4dbf":
+            return ch
+    for ch in title:
+        if ch.isalpha():
+            return ch.upper()
+    return "读"
+
+
 def render_cover(data, reading_minutes):
     title = esc(data.get("title", "长输出"))
     # break the display title after a clause mark so CJK line breaks stay word-safe
@@ -956,7 +958,7 @@ def render_cover(data, reading_minutes):
     subtitle = str(data.get("subtitle") or "").strip()
     standfirst = esc(subtitle).replace("\n", "<br/>") if subtitle else ""
     tags = tag_html(data.get("tags"))
-    seal_char = str(data.get("seal") or (data.get("title") or "读").strip()[:1] or "读")
+    seal_char = str(data.get("seal") or "").strip()[:1] or pick_seal_char(str(data.get("title") or "").strip())
     fan_svg = fan()
     sun_svg = sunburst()
     branch = branch_path()
@@ -968,7 +970,7 @@ def render_cover(data, reading_minutes):
   <div class="ghost" aria-hidden="true">{esc(seal_char)}</div>
   <div class="branch c1" aria-hidden="true">{branch}</div>
   <div class="cover-meta">
-    <div>{esc(data.get("generated_at_display", ""))} · 全文约 {reading_minutes} 分钟</div>
+    <div>{esc(data.get("generated_at_display", ""))} · <span class="meta-nowrap">全文约 {reading_minutes} 分钟</span></div>
     <div class="seal">{esc(seal_char)}</div>
   </div>
   <div class="cover-fan" aria-hidden="true">{fan_svg}</div>
@@ -987,7 +989,7 @@ def render_deck(summary):
         return ""
     deck = list_items(summary)
     return f"""
-  <section class="module module-deck" style="padding-top:52px">
+  <section class="module module-deck">
     <div class="rule-double"></div>
     <div class="mgrid">
       <div class="sec-num sec-num-label">导读</div>
@@ -1003,7 +1005,7 @@ def render_body_section(section, index):
     title = esc(section.get("title", "未命名栏目"))
     lead = str(section.get("lead") or "").strip()
     kicker = str(section.get("kicker") or "").strip()
-    content = add_drop_cap(markdown_to_html(str(section.get("content") or "")))
+    content = markdown_to_html(str(section.get("content") or ""))
     for num in reversed(section.get("_table_range") or []):
         marker = "<div class=\"table-wrap\">"
         replacement = f'<div class="table-wrap">{table_label(num)}'
@@ -1029,7 +1031,7 @@ def render_body_section(section, index):
         notes_html = f'<div class="notecards">{cards}</div>'
     lead_html = f'<p class="sec-lead">{esc(lead)}</p>' if lead else ""
     return f"""
-  <section class="module">
+  <section class="module" id="sec-{index:02d}">
     <div class="rule-double"></div>
     <div class="mgrid">
       <div class="sec-num">{index:02d}</div>
@@ -1055,7 +1057,7 @@ def render_summary_section(section, index):
     kicker = str(section.get("kicker") or "要点")
     intro_html = f'<p class="sec-lead">{esc(intro)}</p>' if intro else ""
     return f"""
-  <section class="module">
+  <section class="module" id="sec-{index:02d}">
     <div class="ghost-num" aria-hidden="true">{index:02d}</div>
     <div class="rule-double"></div>
     <div class="mgrid">
@@ -1115,7 +1117,7 @@ def render_compare_section(section, index):
 
     takeaway_html = f'<p class="takeaway">{esc(takeaway)}</p>' if takeaway else ""
     return f"""
-  <section class="module">
+  <section class="module" id="sec-{index:02d}">
     <div class="rule-double"></div>
     <div class="mgrid">
       <div class="sec-num">{index:02d}</div>
@@ -1141,7 +1143,7 @@ def render_figure_section(section, index):
     sub = f'<div class="fig-sub">{esc(fig["sub"])}</div>' if fig["sub"] else ""
     source = f'<div class="fig-src">{esc(fig["source"])}</div>' if fig["source"] else ""
     return f"""
-  <section class="module">
+  <section class="module" id="sec-{index:02d}">
     <div class="mgrid">
       <div></div>
       <div>
@@ -1220,7 +1222,7 @@ def main():
 
     if appendix:
         sections = list(sections) + [
-            {"title": "附录 / 技术细节", "content": "\n\n".join(appendix), "type": "body"}
+            {"title": "附录 / 技术细节", "kicker": "附录", "content": "\n\n".join(appendix), "type": "body"}
         ]
 
     raw_search = "\n".join(
@@ -1228,7 +1230,9 @@ def main():
         + [str(section.get("content") or section.get("quote") or "") for section in sections]
         + [str(x) for x in appendix or []]
     )
-    total_chars = len(re.sub(r"\s+", "", raw_search))
+    plain = re.sub(r"<[^>]+>", "", raw_search)
+    plain = re.sub(r"[*_`#>]+", "", plain)
+    total_chars = len(re.sub(r"\s+", "", plain))
     reading_minutes = max(1, total_chars // 300) if total_chars else 1
     math_enabled = bool(data.get("math")) or bool(
         re.search(r"\$\$|\\\(|\\\)|\\\[|\\\]|\\begin\{", raw_search)
